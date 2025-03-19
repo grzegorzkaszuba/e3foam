@@ -1,0 +1,22 @@
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       volSymmTensorField;
+    location    "0";
+    object      TinyS_NB;
+}
+
+dimensions      [0 0 -1 0 0 0 0];
+
+internalField   nonuniform List<SymmTensorField> 
+5
+(
+(0.000375273 -0.811028000 0 -0.000407937 0 0)
+(-2.770220000 -0.951032000 0 2.691020000 0 0)
+(-4.400950000 0.785760000 0 4.249400000 0 0)
+(-1.805670000 3.522940000 0 1.894680000 0 0)
+(-0.032247300 2.088050000 0 0.058713700 0 0)
+)
+
+

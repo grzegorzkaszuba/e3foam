@@ -4,7 +4,7 @@ Equivariant scaling operations for tensor data.
 
 from typing import Optional
 import torch
-from e3foam.tensors.base import TensorData
+from tensors.base import TensorData
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
 
@@ -135,3 +135,9 @@ if __name__ == "__main__":
         # Check conservation
         tensor_error = torch.norm(recovered.tensor - combined.tensor)
         print(f"Recovery error: {tensor_error:.8f}")
+
+
+    '''Conclusions:
+    The equivariant scaler must not yield negative values
+    
+    '''

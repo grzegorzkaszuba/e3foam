@@ -1,0 +1,59 @@
+Intended purposes of the library:
+1. Read foamfields:
+a) extract internal field,
+b) extract boundary field if needed,
+c) extract all metadata as entries of a designated Python class
+2. Inspect and modify foam fields
+a) compute error between simulation output foam fields and ground truth foam fields
+b) inject Python-sourced data, like outputs of neural model back intro foam fields, while preserving their functionality
+c) manage entire cases, adressing them by time steps, iterating over time steps, iterating over alternative cases to conduct same operations
+d) inspect entire simulation cases timestep by timestep
+3. Go from openfoam data into irrep tensors of e3nn
+a) use tensor metadata (like "it's a symmetric rank-2 tensor") to assign correct irreps, ✓ [SOLVED in base.py - TensorData class handles this]
+b) use e3nn.io.CartesianTensor class to recompute the internal field into irrep tensor ✓ [SOLVED in base.py - to_irreps() method]
+4. Handle e3nn data for machine learning in physics-informed way
+a) scale the e3nn data in a way that doesn't disrupt equivariant processing ✓ [PARTLY SOLVED in base.py - apply_norms() method preserves directions, but this point is a broad statement and needs further work, also the conditional statements that work with cartesian tensor are quite specific (but it's fine)]
+b) provide an end-to-end pipeline that starts with a collection of foam cases and ends with a dataset ready to give to lightning trainer
+
+
+
+for now don't look at those points at all! We're quite far away
+....................
+5) Ensure reusability
+a) define requirements, setup procedure etc. to ship this whole package as a one-for-all solution that simplified usage of openfoam data and e3nn to similar project size as your generic torch_lightning pipeline
+6) Finally, used it all in another project to:
+a) create a machine learning pipeline based on the data directory provided by Macedo
+b) use neural network-specific aspects from older project of mine, but completely overhaul the data handling scheme, down to the datamodule
+c) make sure the machine learnin
+
+
+Do look at the todos, but one by one. I will pass you the files to the context and we'll discuss
+
+todos:
+
+base:
+TensorData.to_irreps ✓ [IMPLEMENTED - handles conversion to e3nn irreps with proper symmetry handling]
+
+scalers:
+done! ✓ [SOLVED - implements equivariant scaling by only modifying tensor magnitudes, carefully avoiding sign flips that would break equivariance]
+
+foamfield:
+does a lot of work, probably makes writers redundant ✓ [ANALYSIS: 
+- Handles both reading (parse_foam_file) and writing (inject) OpenFOAM fields
+- Provides error metrics (compare_foam_fields)
+- TODO: Will handle time series visualization (plot_case)
+- Writers module might indeed be redundant as injection is handled here]
+
+
+interface:
+could be partly redundant: comparison function is very nice. What about read foamfield. Isn't it better to express it as a classmethod/constructor of FoamField class?
+
+
+writers:
+could be partly reduntant
+
+test:
+- ensure completeness of test data, correctness of test paths
+- summarize tests in separate test folder and ones at the end of scripts in the name==main clause. Decide which of the name==main clause tests should be stored as independent tests based on their complexity - some surely belong at the end of the script, but maybe not all
+- propose new tests to validate other key functionalities. Decide which tests are capable of being tutorial examples and build an ipynb based on them
+- to have better grasp on the tests, for some of them, create the inputs procedurally, inspect them purely in Python, inject the data to openfoam with hopes to see exactly the same thing

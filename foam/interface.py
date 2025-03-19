@@ -1,8 +1,8 @@
 from typing import Union, Dict, List, Optional
 import os
 import torch
-from e3foam.tensors.base import TensorData
-from e3foam.foam.readers import FoamField, parse_foam_file
+from tensors.base import TensorData
+from foam.readers import FoamField, parse_foam_file
 
 def read_foam_field(filepath: str) -> TensorData:
     """
@@ -148,7 +148,7 @@ if __name__ == "__main__":
     print("Running OpenFOAM field reader tests...")
     
     # Setup temp directory
-    temp_dir = os.path.join(os.path.dirname(__file__), '..', 'temp')
+    temp_dir = os.path.join(os.path.dirname(__file__), '..', 'files', 'temp')
     os.makedirs(temp_dir, exist_ok=True)
 
     def print_field_info(foam_field, tensor_data=None, save_path=None):

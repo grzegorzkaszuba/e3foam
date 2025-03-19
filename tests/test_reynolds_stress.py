@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 import torch
 import numpy as np
-from e3foam.foam.readers import compare_foam_fields, parse_foam_file
+from foam.readers import compare_foam_fields, parse_foam_file
 
 def analyze_reynolds_stress_error(dns_path: str, rans_path: str):
     """

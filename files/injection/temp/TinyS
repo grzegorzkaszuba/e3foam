@@ -4,7 +4,7 @@ FoamFile
     format      ascii;
     class       volSymmTensorField;
     location    "0";
-    object      S;
+    object      TinyS;
 }
 
 dimensions      [0 0 -1 0 0 0 0];
