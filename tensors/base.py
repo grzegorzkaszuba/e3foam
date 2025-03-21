@@ -100,8 +100,12 @@ class TensorData:
         print(combined.ptr.ptr)  # tensor([0, 3, 9]) - separating fields
     """
     
-    def __init__(self, tensor: torch.Tensor, parity: int = -1, rank: int = None, symmetry: int = 0, 
-                 is_multi_field: bool = False, is_flattened: bool = False):
+    def __init__(self, tensor: torch.Tensor,
+                 parity: int = -1,
+                 rank: int = None,
+                 symmetry: int = 0,
+                 is_multi_field: bool = False,
+                 is_flattened: bool = False):
         """
         Initialize TensorData with a tensor and optional properties.
         
@@ -129,6 +133,10 @@ class TensorData:
 
         # Rest of the initialization for single-field tensors
         inferred_rank = self._infer_rank() if rank is None else rank
+
+        if inferred_rank == 0 and self.tensor.ndim == 1:
+            self.tensor = self.tensor.reshape(-1, 1)
+
         
         # Initialize structural indices with correct size based on rank and symmetry
         if inferred_rank == 2:
@@ -179,7 +187,7 @@ class TensorData:
             return 0
         elif values_per_field == 3:
             return 1
-        elif values_per_field == 9:
+        elif values_per_field in [9, 6]:
             return 2
         else:
             raise ValueError(f"Cannot infer rank from shape {shape}")
@@ -301,7 +309,8 @@ class TensorData:
         
         return result
 
-    def append(self, other: 'TensorData') -> 'TensorData':
+    @classmethod
+    def append(cls, tensordatas: List['TensorData']) -> 'TensorData':
         """
         Append another TensorData along batch dimension (increasing number of examples).
         Requires exact matching of tensor structure and properties.
@@ -315,28 +324,30 @@ class TensorData:
         Raises:
             ValueError: If tensor structures don't match exactly
         """
-        # Validate structural properties match exactly
-        if not torch.equal(self.ptr.ptr, other.ptr.ptr):
-            raise ValueError("Field pointers must match exactly")
-        
-        if not torch.equal(self.rank.values, other.rank.values):
-            raise ValueError("Rank values must match exactly")
-        
-        if not torch.equal(self.symmetry.values, other.symmetry.values):
-            raise ValueError("Symmetry values must match exactly")
-        
-        if not torch.equal(self.parity.values, other.parity.values):
-            raise ValueError("Parity values must match exactly")
+        first = tensordatas[0]
+        for n, td in enumerate(tensordatas[1:]):
+            # Validate structural properties match exactly
+            if not torch.equal(first.ptr.ptr, td.ptr.ptr):
+                raise ValueError(f"Field pointers must match exactly, mismatch on index 0 and {n+1}")
+
+            if not torch.equal(first.rank.values, td.rank.values):
+                raise ValueError(f"Rank values must match exactly, mismatch on index 0 and {n+1}")
+
+            if not torch.equal(first.symmetry.values, td.symmetry.values):
+                raise ValueError(f"Symmetry values must match exactly, mismatch on index 0 and {n+1}")
+
+            if not torch.equal(first.parity.values, td.parity.values):
+                raise ValueError(f"Parity values must match exactly, mismatch on index 0 and {n+1}")
         
         # If all validations pass, combine the tensors
-        combined_tensor = torch.cat([self.tensor, other.tensor], dim=0)
+        combined_tensor = torch.cat([td.tensor for td in tensordatas], dim=0)
         
         # Create new TensorData with same properties
         result = TensorData(combined_tensor, is_multi_field=True)
-        result.ptr = self.ptr
-        result.rank = self.rank
-        result.symmetry = self.symmetry
-        result.parity = self.parity
+        result.ptr = first.ptr
+        result.rank = first.rank
+        result.symmetry = first.symmetry
+        result.parity = first.parity
         
         return result
 

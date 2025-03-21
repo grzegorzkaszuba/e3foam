@@ -4,7 +4,7 @@ Equivariant scaling operations for tensor data.
 
 from typing import Optional
 import torch
-from tensors.base import TensorData
+from src.e3foam.tensors.base import TensorData
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
 
@@ -48,7 +48,7 @@ class EquivariantScalerWrapper:
         scaled_norms = self.base_scaler.transform(X.norms.values)
         return X.apply_norms(torch.from_numpy(scaled_norms).float())
     
-    def inverse_transform(self, X: TensorData) -> TensorData:
+    def inverse_transform(self, X: TensorData) -> TensorData: #todo this only applied to tensordata, which means the params should be passed to model
         """Restore original scale of TensorData."""
         if not torch.equal(X.ptr.ptr, self.tensor_ptr.ptr):
             raise ValueError("Input tensor structure doesn't match fitted structure")
