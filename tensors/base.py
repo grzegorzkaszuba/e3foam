@@ -101,7 +101,6 @@ class TensorData:
     """
     
     def __init__(self, tensor: torch.Tensor,
-                 parity: int = -1,
                  rank: int = None,
                  symmetry: int = 0,
                  is_multi_field: bool = False,
@@ -111,7 +110,6 @@ class TensorData:
         
         Args:
             tensor: Input tensor
-            parity: Tensor parity (-1 for odd, +1 for even)
             rank: Tensor rank
             symmetry: Tensor symmetry (0: none, 1: symmetric, -1: skew-symmetric)
             is_multi_field: If True, skips rank inference
@@ -160,15 +158,6 @@ class TensorData:
         self.symmetry = TensorIndex(
             values=torch.tensor([symmetry], dtype=torch.long),
             ptr=torch.tensor([0, n_components], dtype=torch.long),
-            dtype=torch.long
-        )
-        
-        # Set parity index (either from input or inferred from rank)
-        if parity not in [-1, 1]:
-            parity = 1 if inferred_rank % 2 == 0 else -1
-        self.parity = TensorIndex(
-            values=torch.tensor([parity], dtype=torch.long),
-            ptr=torch.tensor([0, self.tensor.shape[-1]], dtype=torch.long),
             dtype=torch.long
         )
         
@@ -298,14 +287,12 @@ class TensorData:
         # Combine ranks, symmetries, and parities
         ranks = torch.cat([t.rank.values for t in tensors])
         symmetries = torch.cat([t.symmetry.values for t in tensors])
-        parities = torch.cat([t.parity.values for t in tensors])
         
         # Create new TensorData with combined properties
         result = cls(cat_tensor, is_multi_field=True)
         result.ptr = TensorIndex(torch.tensor([]), ptr, dtype=torch.long)
         result.rank = TensorIndex(ranks, ptr, dtype=torch.long)
         result.symmetry = TensorIndex(symmetries, ptr, dtype=torch.long)
-        result.parity = TensorIndex(parities, ptr, dtype=torch.long)
         
         return result
 
@@ -335,9 +322,6 @@ class TensorData:
 
             if not torch.equal(first.symmetry.values, td.symmetry.values):
                 raise ValueError(f"Symmetry values must match exactly, mismatch on index 0 and {n+1}")
-
-            if not torch.equal(first.parity.values, td.parity.values):
-                raise ValueError(f"Parity values must match exactly, mismatch on index 0 and {n+1}")
         
         # If all validations pass, combine the tensors
         combined_tensor = torch.cat([td.tensor for td in tensordatas], dim=0)
@@ -347,7 +331,6 @@ class TensorData:
         result.ptr = first.ptr
         result.rank = first.rank
         result.symmetry = first.symmetry
-        result.parity = first.parity
         
         return result
 
@@ -386,40 +369,45 @@ class TensorData:
             ptr=torch.tensor([0, end - start]),
             dtype=torch.long
         )
-        result.parity = TensorIndex(
-            values=self.parity.values[field_idx:field_idx+1],
-            ptr=torch.tensor([0, end - start]),
-            dtype=torch.long
-        )
         
         return result
 
     def to_irreps(self):
         """
         Convert TensorData to e3nn representation.
+        
         Returns:
-            tuple: (transformed_tensor, irreps_string)
-            - transformed_tensor: Tensor in irrep basis
+            tuple: (irrep_tensor, irreps_string, cartesian_string)
+            - irrep_tensor: Tensor in irrep basis
             - irreps_string: e3nn irreps description
+            - cartesian_string: String describing the original tensor structure
         """
         irrep_tensors = []
         irrep_strs = []
+        cartesian_parts = []
         
         for i in range(self.num_fields):
             field = self.get_field(i)
             rank = field.rank.values[0].item()
             symmetry = field.symmetry.values[0].item()
+            size = field.tensor.shape[1]
             
-            if rank == 0:  # Scalar
-                irrep_tensors.append(field.tensor)
-                irrep_strs.append("1x0e")
+            # Determine field type and CartesianTensor signature in one step
+            if rank == 0:
+                field_type = "scalar"
+                ct_signature = "0"
+                irrep_str = "1x0e"
+                # Scalar field - just use the tensor directly
+                irrep_data = field.tensor
                 
-            elif rank == 1:  # Vector
-                irrep_tensors.append(field.tensor)
-                # TODO: Consider mechanism to handle '1e' vectors based on domain knowledge
-                irrep_strs.append("1x1o")
+            elif rank == 1:
+                field_type = "vector"
+                ct_signature = "i"
+                irrep_str = "1x1o"
+                # Vector field - just use the tensor directly
+                irrep_data = field.tensor
                 
-            elif rank == 2:  # Rank-2 tensor
+            elif rank == 2:
                 # Create full tensor with same device/dtype as input
                 batch_size = field.tensor.shape[0]
                 full_tensor = torch.zeros(
@@ -429,12 +417,13 @@ class TensorData:
                 )
                 
                 if symmetry == 0:  # No symmetry
+                    field_type = "tensor"
+                    ct_signature = "ij"
                     full_tensor = field.tensor.reshape(batch_size, 3, 3)
-                    ct = CartesianTensor('ij')
-                    irrep_tensors.append(ct.from_cartesian(full_tensor))
-                    irrep_strs.append(str(o3.Irreps(ct)))
                     
                 elif symmetry == 1:  # Symmetric
+                    field_type = "symmetric"
+                    ct_signature = "ij=ji"
                     # [xx, xy, xz, yy, yz, zz] -> 3x3
                     full_tensor[:, 0, 0] = field.tensor[:, 0]  # xx
                     full_tensor[:, 0, 1] = field.tensor[:, 1]  # xy
@@ -446,11 +435,9 @@ class TensorData:
                     full_tensor[:, 2, 1] = field.tensor[:, 4]  # yz
                     full_tensor[:, 2, 2] = field.tensor[:, 5]  # zz
                     
-                    sct = CartesianTensor('ij=ji')
-                    irrep_tensors.append(sct.from_cartesian(full_tensor))
-                    irrep_strs.append(str(o3.Irreps(sct)))
-                    
-                elif symmetry == -1:  # Skew-symmetric
+                else:  # symmetry == -1, Skew-symmetric
+                    field_type = "skew"
+                    ct_signature = "ij=-ji"
                     # [xy, xz, yz] -> 3x3
                     full_tensor[:, 0, 1] = field.tensor[:, 0]   # xy
                     full_tensor[:, 1, 0] = -field.tensor[:, 0]  # -xy
@@ -458,17 +445,182 @@ class TensorData:
                     full_tensor[:, 2, 0] = -field.tensor[:, 1]  # -xz
                     full_tensor[:, 1, 2] = field.tensor[:, 2]   # yz
                     full_tensor[:, 2, 1] = -field.tensor[:, 2]  # -yz
-                    
-                    act = CartesianTensor('ij=-ji')
-                    irrep_tensors.append(act.from_cartesian(full_tensor))
-                    irrep_strs.append(str(o3.Irreps(act)))
+                
+                # Convert to irreps using CartesianTensor
+                ct = CartesianTensor(ct_signature)
+                irrep_data = ct.from_cartesian(full_tensor)
+                irrep_str = str(o3.Irreps(ct))
+            
+            # Add to our lists
+            cartesian_parts.append(f"{field_type}[{size}]:{ct_signature}")
+            irrep_tensors.append(irrep_data)
+            irrep_strs.append(irrep_str)
         
         # Combine tensors and strings
         combined_tensor = torch.cat(irrep_tensors, dim=-1)
-        # Create a single Irreps object from all strings and convert back to string
         irreps_str = str(o3.Irreps(" + ".join(irrep_strs)))
+        cartesian_str = "+".join(cartesian_parts)
         
-        return combined_tensor, irreps_str
+        return combined_tensor, irreps_str, cartesian_str
+
+    @classmethod
+    def from_irreps(cls, irrep_tensor: torch.Tensor, irreps_str: str, cartesian_str: str) -> 'TensorData':
+        """
+        Create TensorData from irrep tensor and strings.
+        
+        Args:
+            irrep_tensor: Tensor in irrep basis from e3nn
+            irreps_str: String describing the irreps structure
+            cartesian_str: String describing the original tensor structure
+            
+        Returns:
+            TensorData object with proper structure and symmetry
+        """
+        # Parse the irreps string
+        irreps = o3.Irreps(irreps_str)
+        print(f"DEBUG: Parsed irreps: {irreps}")
+        
+        # Parse the cartesian string
+        cartesian_parts = cartesian_str.split("+")
+        print(f"DEBUG: Cartesian parts: {cartesian_parts}")
+        
+        # Map irreps to their positions for quick lookup
+        irrep_map = {}
+        start_idx = 0
+        for i, (mul, ir) in enumerate(irreps):
+            irrep_size = mul * (2 * ir.l + 1)
+            key = (ir.l, ir.p)
+            if key not in irrep_map:
+                irrep_map[key] = []
+            irrep_map[key].append((i, start_idx, start_idx + irrep_size))
+            start_idx += irrep_size
+        
+        # Store individual field tensors and their properties
+        field_tensors = []
+        field_ranks = []
+        field_symmetries = []
+        
+        # Process each field according to cartesian string
+        for part in cartesian_parts:
+            # Parse the field type, size, and CartesianTensor signature
+            field_info, ct_signature = part.split(":")
+            field_type, size_str = field_info.split("[")
+            size = int(size_str.rstrip("]"))
+            print(f"DEBUG: Processing field type: {field_type}, size: {size}, signature: {ct_signature}")
+            
+            # Determine field properties
+            batch_size = irrep_tensor.shape[0]
+            
+            if field_type == "scalar":
+                rank = 0
+                symmetry = 0
+                
+                # Get scalar irrep (l=0, p=1)
+                if (0, 1) in irrep_map and irrep_map[(0, 1)]:
+                    _, start, end = irrep_map[(0, 1)][0]
+                    field_tensor = irrep_tensor[:, start:end]
+                    # Remove this irrep from the map
+                    irrep_map[(0, 1)].pop(0)
+                else:
+                    field_tensor = torch.zeros((batch_size, 1), device=irrep_tensor.device)
+                
+            elif field_type == "vector":
+                rank = 1
+                symmetry = 0
+                
+                # Get vector irrep (l=1, p=-1)
+                if (1, -1) in irrep_map and irrep_map[(1, -1)]:
+                    _, start, end = irrep_map[(1, -1)][0]
+                    field_tensor = irrep_tensor[:, start:end]
+                    # Remove this irrep from the map
+                    irrep_map[(1, -1)].pop(0)
+                else:
+                    field_tensor = torch.zeros((batch_size, 3), device=irrep_tensor.device)
+                
+            elif field_type in ["tensor", "symmetric", "skew"]:
+                rank = 2
+                symmetry = {"tensor": 0, "symmetric": 1, "skew": -1}[field_type]
+                
+                # Create CartesianTensor with the signature from the cartesian string
+                ct = CartesianTensor(ct_signature)
+                
+                # Get the irreps for this CartesianTensor
+                ct_irreps = o3.Irreps(ct)
+                
+                # Collect irrep data for this tensor
+                irrep_data = []
+                
+                # For each irrep in the CartesianTensor, find the corresponding data
+                for mul, ir in ct_irreps:
+                    key = (ir.l, ir.p)
+                    if key in irrep_map and irrep_map[key]:
+                        _, start, end = irrep_map[key][0]
+                        irrep_data.append(irrep_tensor[:, start:end])
+                        # Remove this irrep from the map
+                        irrep_map[key].pop(0)
+                    else:
+                        # If not found, add zeros
+                        irrep_size = mul * (2 * ir.l + 1)
+                        irrep_data.append(torch.zeros((batch_size, irrep_size), device=irrep_tensor.device))
+                
+                # Combine the irrep data
+                combined_irrep_data = torch.cat(irrep_data, dim=1)
+                
+                try:
+                    # Convert back to Cartesian
+                    full_tensor = ct.to_cartesian(combined_irrep_data)
+                    print(f"DEBUG: Successfully converted to Cartesian with shape {full_tensor.shape}")
+                    
+                    # Extract the components based on symmetry
+                    if symmetry == 0:  # No symmetry
+                        field_tensor = full_tensor.reshape(batch_size, 9)
+                    elif symmetry == 1:  # Symmetric
+                        field_tensor = torch.zeros((batch_size, 6), device=irrep_tensor.device)
+                        field_tensor[:, 0] = full_tensor[:, 0, 0]  # xx
+                        field_tensor[:, 1] = full_tensor[:, 0, 1]  # xy
+                        field_tensor[:, 2] = full_tensor[:, 0, 2]  # xz
+                        field_tensor[:, 3] = full_tensor[:, 1, 1]  # yy
+                        field_tensor[:, 4] = full_tensor[:, 1, 2]  # yz
+                        field_tensor[:, 5] = full_tensor[:, 2, 2]  # zz
+                    else:  # symmetry == -1, Skew-symmetric
+                        field_tensor = torch.zeros((batch_size, 3), device=irrep_tensor.device)
+                        field_tensor[:, 0] = full_tensor[:, 0, 1]  # xy
+                        field_tensor[:, 1] = full_tensor[:, 0, 2]  # xz
+                        field_tensor[:, 2] = full_tensor[:, 1, 2]  # yz
+                
+                except Exception as e:
+                    print(f"ERROR: Failed to convert to Cartesian: {e}")
+                    # Fallback: create a tensor of the right size
+                    component_counts = {0: 9, 1: 6, -1: 3}
+                    field_tensor = torch.zeros((batch_size, component_counts[symmetry]), device=irrep_tensor.device)
+            
+            # Store this field's data
+            field_tensors.append(field_tensor)
+            field_ranks.append(rank)
+            field_symmetries.append(symmetry)
+        
+        # Combine all fields
+        if len(field_tensors) == 1:
+            # Single field case
+            return cls(
+                tensor=field_tensors[0],
+                rank=field_ranks[0],
+                symmetry=field_symmetries[0],
+                is_flattened=True
+            )
+        else:
+            # Multi-field case - create individual TensorData objects and concatenate
+            tensor_datas = []
+            for i in range(len(field_tensors)):
+                td = cls(
+                    tensor=field_tensors[i],
+                    rank=field_ranks[i],
+                    symmetry=field_symmetries[i],
+                    is_flattened=True
+                )
+                tensor_datas.append(td)
+            
+            return cls.cat(tensor_datas)
 
 @dataclass
 class TensorIndex:
@@ -516,87 +668,131 @@ class TensorIndex:
 
 if __name__ == "__main__":
     torch.manual_seed(42)
-    batch_size = 3  # Small batch for readable output
     
-    # Create test tensors with known values
-    vectors = torch.tensor([
-        [2.0, 0.0, 1.0],  # norm ≈ 2.236
-        [2.0, 0.0, 0.0],  # norm = 2.0
-        [1.0, 1.0, 1.0],  # norm ≈ 1.732
+    print("\n=== Testing All Rank-2 Tensor Symmetries ===")
+    
+    # Create challenging test data for all three symmetry types
+    
+    # 1. General rank-2 tensors (no symmetry)
+    general_tensors = torch.tensor([
+        # A tensor with all different values
+        [[1.0, 2.0, 3.0],
+         [4.0, 5.0, 6.0],
+         [7.0, 8.0, 9.0]],
+        # A tensor with some zeros
+        [[2.0, 0.0, 1.5],
+         [3.0, 2.5, 0.0],
+         [0.0, 1.0, 4.0]],
+        # A tensor with negative values
+        [[-1.0, 0.5, -2.0],
+         [1.5, -3.0, 2.5],
+         [-0.5, 1.0, -1.5]]
     ])
     
-    symmetric = torch.tensor([
-        [[1.0, 0.5, 0.0],
-         [0.5, 1.0, 0.0],
-         [0.0, 0.0, 1.0]],  # Symmetric with clear pattern
-        [[2.0, 0.0, 0.0],
+    # 2. Symmetric tensors
+    symmetric_tensors = torch.tensor([
+        # A symmetric tensor with all different values
+        [[1.0, 2.0, 3.0],
+         [2.0, 4.0, 5.0],
+         [3.0, 5.0, 6.0]],
+        # A diagonal tensor
+        [[3.0, 0.0, 0.0],
          [0.0, 2.0, 0.0],
-         [0.0, 0.0, 2.0]],  # Diagonal
-        [[0.5, 0.0, 0.0],
-         [0.0, 0.5, 0.0],
-         [0.0, 0.0, 0.5]]   # Scaled diagonal
+         [0.0, 0.0, 1.0]],
+        # A symmetric tensor with negative values
+        [[-2.0, 1.5, -0.5],
+         [1.5, 3.0, 2.0],
+         [-0.5, 2.0, -1.0]]
     ])
     
-    skew = torch.tensor([
-        [[0.0, 1.0, 0.0],
-         [-1.0, 0.0, 0.0],
-         [0.0, 0.0, 0.0]],  # Simple rotation in xy
-        [[0.0, 0.0, 2.0],
-         [0.0, 0.0, 0.0],
-         [-2.0, 0.0, 0.0]], # Rotation in xz
-        [[0.0, 0.0, 0.0],
-         [0.0, 0.0, 0.5],
-         [0.0, -0.5, 0.0]]  # Rotation in yz
+    # 3. Skew-symmetric tensors
+    skew_tensors = torch.tensor([
+        # A simple rotation in xy plane
+        [[0.0, 2.0, 0.0],
+         [-2.0, 0.0, 0.0],
+         [0.0, 0.0, 0.0]],
+        # A complex rotation
+        [[0.0, 1.5, 2.0],
+         [-1.5, 0.0, 3.0],
+         [-2.0, -3.0, 0.0]],
+        # A skew tensor with smaller values
+        [[0.0, 0.5, -0.3],
+         [-0.5, 0.0, 0.7],
+         [0.3, -0.7, 0.0]]
     ])
     
     # Create TensorData objects
-    vec_tensor = TensorData(vectors)
-    sym_tensor = TensorData(symmetric, symmetry=1)
-    skew_tensor = TensorData(skew, symmetry=-1)
-    combined = TensorData.cat([sym_tensor, skew_tensor, vec_tensor])
+    general_td = TensorData(general_tensors, symmetry=0)
+    symmetric_td = TensorData(symmetric_tensors, symmetry=1)
+    skew_td = TensorData(skew_tensors, symmetry=-1)
     
-    print("\nBasic combined tensor structure:")
-    print(f"Shape: {combined.shape}")
+    # Test each type individually
+    tensor_types = {
+        "General": general_td,
+        "Symmetric": symmetric_td,
+        "Skew-symmetric": skew_td
+    }
+    
+    for name, td in tensor_types.items():
+        print(f"\n--- Testing {name} Tensors ---")
+        print(f"Original shape: {td.shape}")
+        
+        # Convert to irreps
+        irrep_tensor, irrep_str, cartesian_str = td.to_irreps()
+        print(f"Irrep shape: {irrep_tensor.shape}")
+        print(f"Irrep string: {irrep_str}")
+        print(f"Cartesian string: {cartesian_str}")
+        
+        # Convert back
+        reconstructed = TensorData.from_irreps(irrep_tensor, irrep_str, cartesian_str)
+        
+        # Compare
+        print(f"Reconstructed shape: {reconstructed.shape}")
+        print(f"Original tensor:\n{td.tensor}")
+        print(f"Reconstructed tensor:\n{reconstructed.tensor}")
+        diff = torch.max(torch.abs(td.tensor - reconstructed.tensor))
+        print(f"Max difference: {diff}")
+        print(f"Round-trip successful: {diff < 1e-5}")
+    
+    # Test all types combined
+    print("\n--- Testing Combined Tensor Types ---")
+    combined = TensorData.cat([general_td, symmetric_td, skew_td])
+    print(f"Combined shape: {combined.shape}")
     print(f"Field ptr: {combined.ptr.ptr}")
     print(f"Ranks: {combined.rank.values}")
     print(f"Symmetries: {combined.symmetry.values}")
     
-    if False:  # Original tests
-        print("\nDetailed tensor tests:")
-        tensor_types = {
-            "General rank-2": symmetric,  # Using symmetric as general rank-2
-            "Symmetric": symmetric,
-            "Skew-symmetric": skew,
-            "Vector": vectors,
-        }
-        
-        for name, tensor in tensor_types.items():
-            print(f"\n{name} tensor:")
-            td = TensorData(tensor)
-            print(f"Rank: {td.rank.values[0]}")
-            print(f"Symmetry: {td.symmetry.values[0]}")
-            print(f"Shape after flattening: {td.shape}")
-            print(f"Field ptr: {td.ptr.ptr}")
-            norms = td.norms
-            print(f"Norms shape: {norms.values.shape}")
-            print(f"Norm ptr: {norms.ptr}")
+    # Convert to irreps
+    irrep_tensor, irrep_str, cartesian_str = combined.to_irreps()
+    print(f"Irrep shape: {irrep_tensor.shape}")
+    print(f"Irrep string: {irrep_str}")
     
-    if True:  # Test irrep conversion
-        print("\nTesting irrep conversion:")
-        # Convert to irreps
-        irrep_tensor, irrep_str = combined.to_irreps()
-        
-        print("\nIrrep structure:")
-        print(f"Original tensor shape: {combined.shape}")
-        print(f"Irrep tensor shape: {irrep_tensor.shape}")
-        print(f"Irrep string: {irrep_str}")
-        
-        # Test individual fields
-        for i in range(combined.num_fields):
-            field = combined.get_field(i)
-            field_irrep, field_str = field.to_irreps()
-            print(f"\nField {i}:")
-            print(f"Type: {'Symmetric' if field.symmetry.values[0] == 1 else 'Skew-symmetric' if field.symmetry.values[0] == -1 else 'Vector'}")
-            print(f"Original shape: {field.shape}")
-            print(f"Irrep shape: {field_irrep.shape}")
-            print(f"Irrep string: {field_str}")
+    # Convert back
+    reconstructed = TensorData.from_irreps(irrep_tensor, irrep_str, cartesian_str)
+    
+    # Compare
+    print(f"Reconstructed shape: {reconstructed.shape}")
+    diff = torch.max(torch.abs(combined.tensor - reconstructed.tensor))
+    print(f"Max difference: {diff}")
+    print(f"Round-trip successful: {diff < 1e-5}")
+    
+    # Test with scaling
+    print("\n--- Testing with Scaling ---")
+    from preprocessing.scalers import EquivariantScalerWrapper, MeanScaler
+    
+    scaler = EquivariantScalerWrapper(MeanScaler())
+    scaled = scaler.fit_transform(combined)
+    
+    # Convert to irreps
+    scaled_irrep, scaled_irrep_str, scaled_cart_str = scaled.to_irreps()
+    
+    # Convert back
+    reconstructed_scaled = TensorData.from_irreps(scaled_irrep, scaled_irrep_str, scaled_cart_str)
+    
+    # Inverse transform
+    original_scale = scaler.inverse_transform(reconstructed_scaled)
+    
+    # Compare
+    diff = torch.max(torch.abs(combined.tensor - original_scale.tensor))
+    print(f"Max difference after scaling round-trip: {diff}")
+    print(f"Full pipeline successful: {diff < 1e-5}")
