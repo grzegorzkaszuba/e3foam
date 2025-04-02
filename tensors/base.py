@@ -476,11 +476,16 @@ class TensorData:
         Returns:
             TensorData object with proper structure and symmetry
         """
+        # TODO: Implement caching for CartesianTensor operations
+        # The CartesianTensor class can be slow for repeated operations.
+        # Consider caching the results of reducedtensorproducts to improve performance,
+        # especially when processing batches of similar tensor structures.
+        
         # Parse the irreps string
         irreps = o3.Irreps(irreps_str)
-        print(f"DEBUG: Parsed irreps: {irreps}")
+        print(f"DEBUG: Parsed irreps: {irreps_str}")
         
-        # Parse the cartesian string
+        # Parse the cartesian string to get field information
         cartesian_parts = cartesian_str.split("+")
         print(f"DEBUG: Cartesian parts: {cartesian_parts}")
         
@@ -622,6 +627,67 @@ class TensorData:
             
             return cls.cat(tensor_datas)
 
+    def project_to_2d(self) -> 'TensorData':
+        """
+        Project a 3D TensorData to 2D by zeroing out all components involving the z-dimension.
+        
+        Returns:
+            A new TensorData with z-components set to zero
+        
+        Note:
+            This preserves the tensor structure but zeros out any component that involves
+            the z-dimension (index 2 in 0-based indexing).
+        """
+        # Create a copy of the tensor
+        projected = self.tensor.clone()
+        
+        # Process each field
+        for i in range(self.num_fields):
+            field = self.get_field(i)
+            rank = field.rank.values[0].item()
+            symmetry = field.symmetry.values[0].item()
+            start, end = self.ptr.ptr[i], self.ptr.ptr[i+1]
+            
+            if rank == 0:
+                # Scalars are unchanged in projection
+                pass
+            
+            elif rank == 1:
+                # For vectors, zero out the z-component (index 2)
+                projected[:, start+2] = 0.0
+            
+            elif rank == 2:
+                if symmetry == 0:  # General tensor
+                    # Zero out any component involving z (index 2)
+                    # In flattened form: [xx, xy, xz, yx, yy, yz, zx, zy, zz]
+                    z_components = [2, 5, 6, 7, 8]  # xz, yz, zx, zy, zz
+                    for idx in z_components:
+                        projected[:, start+idx] = 0.0
+                
+                elif symmetry == 1:  # Symmetric tensor
+                    # In flattened form: [xx, xy, xz, yy, yz, zz]
+                    z_components = [2, 4, 5]  # xz, yz, zz
+                    for idx in z_components:
+                        projected[:, start+idx] = 0.0
+                
+                elif symmetry == -1:  # Skew-symmetric tensor
+                    # In flattened form: [xy, xz, yz]
+                    z_components = [1, 2]  # xz, yz
+                    for idx in z_components:
+                        projected[:, start+idx] = 0.0
+        
+        # TODO: manage trace management
+        # Consider how to handle trace redistribution for traceless tensors
+        # when projecting to 2D
+        
+        # Create a new TensorData with the projected tensor
+        result = TensorData(projected, is_multi_field=True)
+        result.ptr = self.ptr
+        result.rank = self.rank
+        result.symmetry = self.symmetry
+        
+        return result
+
 @dataclass
 class TensorIndex:
     """
@@ -667,6 +733,14 @@ class TensorIndex:
 
 
 if __name__ == "__main__":
+    # Add parent directory to path for imports
+    import sys
+    import os
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    
+    # Now we can import from preprocessing
+    from preprocessing.scalers import EquivariantScalerWrapper, MeanScaler
+    
     torch.manual_seed(42)
     
     print("\n=== Testing All Rank-2 Tensor Symmetries ===")
@@ -778,8 +852,6 @@ if __name__ == "__main__":
     
     # Test with scaling
     print("\n--- Testing with Scaling ---")
-    from preprocessing.scalers import EquivariantScalerWrapper, MeanScaler
-    
     scaler = EquivariantScalerWrapper(MeanScaler())
     scaled = scaler.fit_transform(combined)
     
@@ -796,3 +868,129 @@ if __name__ == "__main__":
     diff = torch.max(torch.abs(combined.tensor - original_scale.tensor))
     print(f"Max difference after scaling round-trip: {diff}")
     print(f"Full pipeline successful: {diff < 1e-5}")
+
+    # Test for project_to_2d
+    if True:
+        print("\n=== Testing project_to_2d Method ===")
+        
+        # Create test data with clear 3D components
+        
+        # 1. Vector field
+        vectors = torch.tensor([
+            [1.0, 2.0, 3.0],    # Clear z component
+            [4.0, 5.0, 0.0],    # No z component
+            [-1.0, 0.0, 2.0]    # Negative x, zero y, positive z
+        ])
+        
+        # 2. General tensor
+        general_tensor = torch.tensor([
+            [[1.0, 2.0, 3.0],   # Has z components
+             [4.0, 5.0, 6.0],
+             [7.0, 8.0, 9.0]],
+            [[2.0, 0.0, 0.0],   # No z components in first row
+             [0.0, 3.0, 1.0],
+             [0.0, 2.0, 4.0]],
+            [[1.0, 0.0, 0.0],   # Only diagonal components
+             [0.0, 2.0, 0.0],
+             [0.0, 0.0, 3.0]]
+        ])
+        
+        # 3. Symmetric tensor
+        symmetric_tensor = torch.tensor([
+            [[1.0, 2.0, 3.0],   # Symmetric with z components
+             [2.0, 4.0, 5.0],
+             [3.0, 5.0, 6.0]],
+            [[3.0, 0.0, 0.0],   # Diagonal
+             [0.0, 2.0, 0.0],
+             [0.0, 0.0, 1.0]],
+            [[2.0, 1.0, 0.0],   # No z components
+             [1.0, 2.0, 0.0],
+             [0.0, 0.0, 0.0]]
+        ])
+        
+        # 4. Skew-symmetric tensor
+        skew_tensor = torch.tensor([
+            [[0.0, 2.0, 3.0],    # With z components
+             [-2.0, 0.0, 1.0],
+             [-3.0, -1.0, 0.0]],
+            [[0.0, 1.0, 0.0],    # Only xy component
+             [-1.0, 0.0, 0.0],
+             [0.0, 0.0, 0.0]],
+            [[0.0, 0.0, 2.0],    # Only xz and yz components
+             [0.0, 0.0, 3.0],
+             [-2.0, -3.0, 0.0]]
+        ])
+        
+        # Create TensorData objects
+        vector_td = TensorData(vectors)
+        general_td = TensorData(general_tensor, symmetry=0)
+        symmetric_td = TensorData(symmetric_tensor, symmetry=1)
+        skew_td = TensorData(skew_tensor, symmetry=-1)
+        
+        # Test each type individually
+        tensor_types = {
+            "Vector": vector_td,
+            "General": general_td,
+            "Symmetric": symmetric_td,
+            "Skew-symmetric": skew_td
+        }
+        
+        for name, td in tensor_types.items():
+            print(f"\n--- Testing {name} Projection to 2D ---")
+            print(f"Original tensor:\n{td.tensor}")
+            
+            # Project to 2D
+            projected = td.project_to_2d()
+            print(f"Projected tensor:\n{projected.tensor}")
+            
+            # Verify z components are zero
+            if name == "Vector":
+                # Check that z components (index 2) are zero
+                z_components = projected.tensor[:, 2]
+                print(f"Z components: {z_components}")
+                print(f"All z components zero: {torch.all(z_components == 0.0)}")
+                
+            elif name == "General":
+                # Check that all components involving z are zero
+                # In flattened form: [xx, xy, xz, yx, yy, yz, zx, zy, zz]
+                z_indices = [2, 5, 6, 7, 8]  # xz, yz, zx, zy, zz
+                z_components = projected.tensor[:, z_indices]
+                print(f"Z components shape: {z_components.shape}")
+                print(f"All z components zero: {torch.all(z_components == 0.0)}")
+                
+            elif name == "Symmetric":
+                # In flattened form: [xx, xy, xz, yy, yz, zz]
+                z_indices = [2, 4, 5]  # xz, yz, zz
+                z_components = projected.tensor[:, z_indices]
+                print(f"Z components shape: {z_components.shape}")
+                print(f"All z components zero: {torch.all(z_components == 0.0)}")
+                
+            elif name == "Skew-symmetric":
+                # In flattened form: [xy, xz, yz]
+                z_indices = [1, 2]  # xz, yz
+                z_components = projected.tensor[:, z_indices]
+                print(f"Z components shape: {z_components.shape}")
+                print(f"All z components zero: {torch.all(z_components == 0.0)}")
+        
+        # Test combined tensor
+        print("\n--- Testing Combined Tensor Projection ---")
+        combined = TensorData.cat([vector_td, general_td, symmetric_td, skew_td])
+        print(f"Combined shape: {combined.shape}")
+        print(f"Field ptr: {combined.ptr.ptr}")
+        
+        # Project to 2D
+        projected_combined = combined.project_to_2d()
+        print(f"Projected shape: {projected_combined.shape}")
+        
+        # Verify structure is preserved
+        print(f"Original ptr: {combined.ptr.ptr}")
+        print(f"Projected ptr: {projected_combined.ptr.ptr}")
+        print(f"Pointers match: {torch.equal(combined.ptr.ptr, projected_combined.ptr.ptr)}")
+        
+        print(f"Original ranks: {combined.rank.values}")
+        print(f"Projected ranks: {projected_combined.rank.values}")
+        print(f"Ranks match: {torch.equal(combined.rank.values, projected_combined.rank.values)}")
+        
+        print(f"Original symmetries: {combined.symmetry.values}")
+        print(f"Projected symmetries: {projected_combined.symmetry.values}")
+        print(f"Symmetries match: {torch.equal(combined.symmetry.values, projected_combined.symmetry.values)}")
