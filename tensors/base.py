@@ -464,7 +464,8 @@ class TensorData:
         return combined_tensor, irreps_str, cartesian_str
 
     @classmethod
-    def from_irreps(cls, irrep_tensor: torch.Tensor, irreps_str: str, cartesian_str: str) -> 'TensorData':
+    def from_irreps(cls, irrep_tensor: torch.Tensor, irreps_str: str, cartesian_str: str, 
+                    cache_rtps: bool = False, cached_rtps: dict = None) -> 'TensorData':
         """
         Create TensorData from irrep tensor and strings.
         
@@ -472,6 +473,8 @@ class TensorData:
             irrep_tensor: Tensor in irrep basis from e3nn
             irreps_str: String describing the irreps structure
             cartesian_str: String describing the original tensor structure
+            cache_rtps: If True, create and cache reduced tensor products for future use
+            cached_rtps: Dictionary of pre-computed reduced tensor products to use
             
         Returns:
             TensorData object with proper structure and symmetry
@@ -505,6 +508,10 @@ class TensorData:
         field_ranks = []
         field_symmetries = []
         
+        # Initialize cache for CartesianTensor objects and their RTPs
+        ct_cache = {}
+        rtp_cache = {}
+        
         # Process each field according to cartesian string
         for part in cartesian_parts:
             # Parse the field type, size, and CartesianTensor signature
@@ -523,11 +530,13 @@ class TensorData:
                 # Get scalar irrep (l=0, p=1)
                 if (0, 1) in irrep_map and irrep_map[(0, 1)]:
                     _, start, end = irrep_map[(0, 1)][0]
-                    field_tensor = irrep_tensor[:, start:end]
-                    # Remove this irrep from the map
-                    irrep_map[(0, 1)].pop(0)
+                    irrep_map[(0, 1)].pop(0)  # Remove used irrep
+                    field_data = irrep_tensor[:, start:end]
                 else:
-                    field_tensor = torch.zeros((batch_size, 1), device=irrep_tensor.device)
+                    raise ValueError(f"No scalar irrep found for field: {part}")
+                
+                # Reshape to match expected format
+                field_tensor = field_data.reshape(batch_size, 1)
                 
             elif field_type == "vector":
                 rank = 1
@@ -536,96 +545,131 @@ class TensorData:
                 # Get vector irrep (l=1, p=-1)
                 if (1, -1) in irrep_map and irrep_map[(1, -1)]:
                     _, start, end = irrep_map[(1, -1)][0]
-                    field_tensor = irrep_tensor[:, start:end]
-                    # Remove this irrep from the map
-                    irrep_map[(1, -1)].pop(0)
+                    irrep_map[(1, -1)].pop(0)  # Remove used irrep
+                    field_data = irrep_tensor[:, start:end]
                 else:
-                    field_tensor = torch.zeros((batch_size, 3), device=irrep_tensor.device)
+                    raise ValueError(f"No vector irrep found for field: {part}")
+                
+                # Reshape to match expected format
+                field_tensor = field_data.reshape(batch_size, 3)
                 
             elif field_type in ["tensor", "symmetric", "skew"]:
                 rank = 2
-                symmetry = {"tensor": 0, "symmetric": 1, "skew": -1}[field_type]
                 
-                # Create CartesianTensor with the signature from the cartesian string
-                ct = CartesianTensor(ct_signature)
+                # Set symmetry based on field type
+                if field_type == "tensor":
+                    symmetry = 0
+                elif field_type == "symmetric":
+                    symmetry = 1
+                else:  # skew
+                    symmetry = -1
                 
-                # Get the irreps for this CartesianTensor
-                ct_irreps = o3.Irreps(ct)
+                # Get CartesianTensor for this field type
+                if ct_signature in ct_cache:
+                    ct = ct_cache[ct_signature]
+                else:
+                    ct = CartesianTensor(ct_signature)
+                    if cache_rtps:
+                        ct_cache[ct_signature] = ct
                 
-                # Collect irrep data for this tensor
-                irrep_data = []
+                # Extract irreps for this field
+                field_irreps = []
                 
-                # For each irrep in the CartesianTensor, find the corresponding data
-                for mul, ir in ct_irreps:
-                    key = (ir.l, ir.p)
-                    if key in irrep_map and irrep_map[key]:
-                        _, start, end = irrep_map[key][0]
-                        irrep_data.append(irrep_tensor[:, start:end])
-                        # Remove this irrep from the map
-                        irrep_map[key].pop(0)
+                # Determine which irreps to extract based on field type
+                if field_type == "tensor":
+                    # General tensor: l=0, l=1, l=2
+                    irrep_types = [(0, 1), (1, -1), (2, 1)]
+                elif field_type == "symmetric":
+                    # Symmetric tensor: l=0, l=2
+                    irrep_types = [(0, 1), (2, 1)]
+                else:  # skew
+                    # Skew-symmetric tensor: l=1
+                    irrep_types = [(1, -1)]
+                
+                # Extract each irrep type
+                for l, p in irrep_types:
+                    if (l, p) in irrep_map and irrep_map[(l, p)]:
+                        _, start, end = irrep_map[(l, p)][0]
+                        irrep_map[(l, p)].pop(0)  # Remove used irrep
+                        field_irreps.append(irrep_tensor[:, start:end])
                     else:
-                        # If not found, add zeros
-                        irrep_size = mul * (2 * ir.l + 1)
-                        irrep_data.append(torch.zeros((batch_size, irrep_size), device=irrep_tensor.device))
+                        raise ValueError(f"No irrep (l={l}, p={p}) found for field: {part}")
                 
-                # Combine the irrep data
-                combined_irrep_data = torch.cat(irrep_data, dim=1)
+                # Concatenate irreps
+                field_data = torch.cat(field_irreps, dim=1)
                 
-                try:
-                    # Convert back to Cartesian
-                    full_tensor = ct.to_cartesian(combined_irrep_data)
-                    print(f"DEBUG: Successfully converted to Cartesian with shape {full_tensor.shape}")
-                    
-                    # Extract the components based on symmetry
-                    if symmetry == 0:  # No symmetry
-                        field_tensor = full_tensor.reshape(batch_size, 9)
-                    elif symmetry == 1:  # Symmetric
-                        field_tensor = torch.zeros((batch_size, 6), device=irrep_tensor.device)
-                        field_tensor[:, 0] = full_tensor[:, 0, 0]  # xx
-                        field_tensor[:, 1] = full_tensor[:, 0, 1]  # xy
-                        field_tensor[:, 2] = full_tensor[:, 0, 2]  # xz
-                        field_tensor[:, 3] = full_tensor[:, 1, 1]  # yy
-                        field_tensor[:, 4] = full_tensor[:, 1, 2]  # yz
-                        field_tensor[:, 5] = full_tensor[:, 2, 2]  # zz
-                    else:  # symmetry == -1, Skew-symmetric
-                        field_tensor = torch.zeros((batch_size, 3), device=irrep_tensor.device)
-                        field_tensor[:, 0] = full_tensor[:, 0, 1]  # xy
-                        field_tensor[:, 1] = full_tensor[:, 0, 2]  # xz
-                        field_tensor[:, 2] = full_tensor[:, 1, 2]  # yz
+                # Convert to Cartesian tensor
+                # Use cached RTPs if available
+                if cached_rtps and ct_signature in cached_rtps:
+                    rtp = cached_rtps[ct_signature]
+                    field_tensor_3d = ct.to_cartesian(field_data, rtp=rtp)
+                else:
+                    # Generate RTP if caching is enabled
+                    if cache_rtps:
+                        if ct_signature not in rtp_cache:
+                            rtp_cache[ct_signature] = ct.reduced_tensor_products(field_data)
+                        field_tensor_3d = ct.to_cartesian(field_data, rtp=rtp_cache[ct_signature])
+                    else:
+                        field_tensor_3d = ct.to_cartesian(field_data)
                 
-                except Exception as e:
-                    print(f"ERROR: Failed to convert to Cartesian: {e}")
-                    # Fallback: create a tensor of the right size
-                    component_counts = {0: 9, 1: 6, -1: 3}
-                    field_tensor = torch.zeros((batch_size, component_counts[symmetry]), device=irrep_tensor.device)
+                print(f"DEBUG: Successfully converted to Cartesian with shape {field_tensor_3d.shape}")
+                
+                # Flatten tensor according to symmetry
+                if symmetry == 0:  # No symmetry
+                    field_tensor = field_tensor_3d.reshape(batch_size, 9)
+                elif symmetry == 1:  # Symmetric
+                    # Extract unique components [xx, xy, xz, yy, yz, zz]
+                    field_tensor = torch.zeros((batch_size, 6), device=field_tensor_3d.device, dtype=field_tensor_3d.dtype)
+                    field_tensor[:, 0] = field_tensor_3d[:, 0, 0]  # xx
+                    field_tensor[:, 1] = field_tensor_3d[:, 0, 1]  # xy
+                    field_tensor[:, 2] = field_tensor_3d[:, 0, 2]  # xz
+                    field_tensor[:, 3] = field_tensor_3d[:, 1, 1]  # yy
+                    field_tensor[:, 4] = field_tensor_3d[:, 1, 2]  # yz
+                    field_tensor[:, 5] = field_tensor_3d[:, 2, 2]  # zz
+                else:  # symmetry == -1, Skew-symmetric
+                    # Extract unique components [xy, xz, yz]
+                    field_tensor = torch.zeros((batch_size, 3), device=field_tensor_3d.device, dtype=field_tensor_3d.dtype)
+                    field_tensor[:, 0] = field_tensor_3d[:, 0, 1]  # xy
+                    field_tensor[:, 1] = field_tensor_3d[:, 0, 2]  # xz
+                    field_tensor[:, 2] = field_tensor_3d[:, 1, 2]  # yz
             
-            # Store this field's data
+            # Store field data and properties
             field_tensors.append(field_tensor)
             field_ranks.append(rank)
             field_symmetries.append(symmetry)
         
-        # Combine all fields
-        if len(field_tensors) == 1:
-            # Single field case
-            return cls(
-                tensor=field_tensors[0],
-                rank=field_ranks[0],
-                symmetry=field_symmetries[0],
+        # Return cached RTPs if requested
+        if cache_rtps:
+            return cls.from_fields(field_tensors, field_ranks, field_symmetries), rtp_cache
+        
+        # Create TensorData from fields
+        return cls.from_fields(field_tensors, field_ranks, field_symmetries)
+
+    @classmethod
+    def from_fields(cls, field_tensors, field_ranks, field_symmetries):
+        """
+        Create TensorData from individual field tensors and properties.
+        
+        Args:
+            field_tensors: List of tensors for each field
+            field_ranks: List of ranks for each field
+            field_symmetries: List of symmetry values for each field
+            
+        Returns:
+            TensorData object with proper structure
+        """
+        # Create individual TensorData objects
+        tensor_datas = []
+        for i in range(len(field_tensors)):
+            td = cls(
+                field_tensors[i],
+                rank=field_ranks[i],
+                symmetry=field_symmetries[i],
                 is_flattened=True
             )
-        else:
-            # Multi-field case - create individual TensorData objects and concatenate
-            tensor_datas = []
-            for i in range(len(field_tensors)):
-                td = cls(
-                    tensor=field_tensors[i],
-                    rank=field_ranks[i],
-                    symmetry=field_symmetries[i],
-                    is_flattened=True
-                )
-                tensor_datas.append(td)
-            
-            return cls.cat(tensor_datas)
+            tensor_datas.append(td)
+        
+        return cls.cat(tensor_datas)
 
     def project_to_2d(self) -> 'TensorData':
         """
