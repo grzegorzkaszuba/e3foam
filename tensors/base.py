@@ -742,379 +742,319 @@ class TensorData:
 
     def get_irrep_rizzler(self):
         """
-        Creates an optimized function that converts tensor data to irrep representation.
-        
-        The returned function takes a tensor with the same structure as self.tensor
-        and returns its irrep representation without creating TensorData objects.
+        Creates an optimized object that converts tensor data to irrep representation.
         
         Returns:
-            callable: A function that transforms tensor data to irrep representation
+            IrrepRizzler: An object that transforms tensor data to irrep representation
         """
-        # Prepare the transformation logic for each field
-        field_transformers = []
-        irrep_strs = []
-        
-        for i in range(self.num_fields):
-            field = self.get_field(i)
-            rank = field.rank.values[0].item()
-            symmetry = field.symmetry.values[0].item()
-            start, end = self.ptr.ptr[i], self.ptr.ptr[i+1]
-            
-            if rank == 0:
-                # Scalar field - identity transformation
-                irrep_strs.append("1x0e")
-                
-                def scalar_transform(tensor, s=start, e=end):
-                    return tensor[:, s:e]
-                
-                field_transformers.append(scalar_transform)
-                
-            elif rank == 1:
-                # Vector field - identity transformation
-                irrep_strs.append("1x1o")
-                
-                def vector_transform(tensor, s=start, e=end):
-                    return tensor[:, s:e]
-                
-                field_transformers.append(vector_transform)
-                
-            elif rank == 2:
-                # Create a closure with the appropriate CartesianTensor
-                if symmetry == 0:  # No symmetry
-                    ct_signature = "ij"
-                    irrep_strs.append("1x0e+1x1o+1x2e")
-                    
-                    # Create CartesianTensor once
-                    ct = CartesianTensor(ct_signature)
-                    
-                    def general_transform(tensor, s=start, e=end, ct=ct):
-                        batch_size = tensor.shape[0]
-                        field_tensor = tensor[:, s:e].reshape(batch_size, 3, 3)
-                        return ct.from_cartesian(field_tensor)
-                    
-                    field_transformers.append(general_transform)
-                    
-                elif symmetry == 1:  # Symmetric
-                    ct_signature = "ij=ji"
-                    irrep_strs.append("1x0e+1x2e")
-                    
-                    # Create CartesianTensor once
-                    ct = CartesianTensor(ct_signature)
-                    
-                    def symmetric_transform(tensor, s=start, e=end, ct=ct):
-                        batch_size = tensor.shape[0]
-                        # Reconstruct 3x3 symmetric tensor from 6 components
-                        full_tensor = torch.zeros(
-                            (batch_size, 3, 3), 
-                            device=tensor.device, 
-                            dtype=tensor.dtype
-                        )
-                        
-                        # [xx, xy, xz, yy, yz, zz] -> 3x3
-                        full_tensor[:, 0, 0] = tensor[:, s+0]  # xx
-                        full_tensor[:, 0, 1] = tensor[:, s+1]  # xy
-                        full_tensor[:, 1, 0] = tensor[:, s+1]  # xy
-                        full_tensor[:, 0, 2] = tensor[:, s+2]  # xz
-                        full_tensor[:, 2, 0] = tensor[:, s+2]  # xz
-                        full_tensor[:, 1, 1] = tensor[:, s+3]  # yy
-                        full_tensor[:, 1, 2] = tensor[:, s+4]  # yz
-                        full_tensor[:, 2, 1] = tensor[:, s+4]  # yz
-                        full_tensor[:, 2, 2] = tensor[:, s+5]  # zz
-                        
-                        return ct.from_cartesian(full_tensor)
-                    
-                    field_transformers.append(symmetric_transform)
-                    
-                else:  # symmetry == -1, Skew-symmetric
-                    ct_signature = "ij=-ji"
-                    irrep_strs.append("1x1o")
-                    
-                    # Create CartesianTensor once
-                    ct = CartesianTensor(ct_signature)
-                    
-                    def skew_transform(tensor, s=start, e=end, ct=ct):
-                        batch_size = tensor.shape[0]
-                        # Reconstruct 3x3 skew-symmetric tensor from 3 components
-                        full_tensor = torch.zeros(
-                            (batch_size, 3, 3), 
-                            device=tensor.device, 
-                            dtype=tensor.dtype
-                        )
-                        
-                        # [xy, xz, yz] -> 3x3
-                        full_tensor[:, 0, 1] = tensor[:, s+0]   # xy
-                        full_tensor[:, 1, 0] = -tensor[:, s+0]  # -xy
-                        full_tensor[:, 0, 2] = tensor[:, s+1]   # xz
-                        full_tensor[:, 2, 0] = -tensor[:, s+1]  # -xz
-                        full_tensor[:, 1, 2] = tensor[:, s+2]   # yz
-                        full_tensor[:, 2, 1] = -tensor[:, s+2]  # -yz
-                        
-                        return ct.from_cartesian(full_tensor)
-                    
-                    field_transformers.append(skew_transform)
-        
-        # Create the combined irreps string
-        irreps_str = "+".join(irrep_strs)
-        
-        # Create the final transformation function
-        def irrep_rizzler(tensor):
-            """
-            Transform tensor data to irrep representation.
-            
-            Args:
-                tensor: Input tensor with same structure as self.tensor
-                
-            Returns:
-                Tensor in irrep representation
-            """
-            # Apply each field transformer and concatenate results
-            irrep_tensors = [
-                transformer(tensor) for transformer in field_transformers
-            ]
-            return torch.cat(irrep_tensors, dim=1), irreps_str
-        
-        return irrep_rizzler
+        # Create a rizzler object instead of a function
+        return IrrepRizzler(self)
 
-    def get_cartesian_rizzler(self, cache_rtps: bool = False):
+    def get_cartesian_rizzler(self, cache_rtps=False):
         """
-        Creates an optimized function that converts irrep tensor back to Cartesian representation.
-        
-        The returned function takes an irrep tensor and returns its Cartesian representation
-        without creating TensorData objects.
+        Creates an optimized object that converts irrep tensor back to Cartesian representation.
         
         Args:
             cache_rtps: If True, pre-compute reduced tensor products for better performance
             
         Returns:
-            callable: A function that transforms irrep tensor to Cartesian representation
+            CartesianRizzler: An object that transforms irrep tensor to Cartesian representation
         """
+        # Create a rizzler object instead of a function
+        return CartesianRizzler(self, cache_rtps=cache_rtps)
+
+
+class IrrepRizzler:
+    """
+    Object that efficiently converts tensor data to irrep representation.
+    """
+    def __init__(self, tensor_data):
+        """
+        Initialize the IrrepRizzler with a TensorData object.
+        
+        Args:
+            tensor_data: TensorData object to base the transformation on
+        """
+        # Store original tensor data properties
+        self.tensor_data = tensor_data
+        self.num_fields = tensor_data.num_fields
+        self.field_transformers = []
+        
+        # Get the irreps string and cartesian string
+        _, self.irreps_str, self.cartesian_str = tensor_data.to_irreps()
+    
+    def __call__(self, tensor):
+        """
+        Transform tensor data to irrep representation.
+        
+        Args:
+            tensor: Tensor with the same structure as the original TensorData
+            
+        Returns:
+            tuple: (irrep_tensor, irreps_str)
+        """
+        # Create a temporary TensorData object with the same structure
+        temp_td = TensorData(tensor, is_multi_field=True)
+        temp_td.ptr = self.tensor_data.ptr
+        temp_td.rank = self.tensor_data.rank
+        temp_td.symmetry = self.tensor_data.symmetry
+        
+        # Use the existing to_irreps method for consistency
+        irrep_tensor, irreps_str, _ = temp_td.to_irreps()
+        
+        # Return the irrep tensor and string (matching original behavior)
+        return irrep_tensor, irreps_str
+
+
+class CartesianRizzler:
+    """
+    Object that efficiently converts irrep tensor back to Cartesian representation.
+    """
+    def __init__(self, tensor_data, cache_rtps=False):
+        """
+        Initialize the CartesianRizzler with a TensorData object.
+        
+        Args:
+            tensor_data: TensorData object to base the transformation on
+            cache_rtps: If True, pre-compute reduced tensor products for better performance
+        """
+        # Store original tensor data properties
+        self.tensor_data = tensor_data
+        
         # Get irrep and Cartesian information
-        _, irreps_str, cartesian_str = self.to_irreps()
-        irreps = o3.Irreps(irreps_str)
-        cartesian_parts = cartesian_str.split("+")
+        _, self.irreps_str, self.cartesian_str = tensor_data.to_irreps()
+        self.irreps = o3.Irreps(self.irreps_str)
+        self.cartesian_parts = self.cartesian_str.split("+")
         
         # Map irreps to their positions for quick lookup
-        # We'll use just the l value as the key since parity might differ
-        irrep_map = {}
+        self.irrep_map = {}
         start_idx = 0
-        for i, (mul, ir) in enumerate(irreps):
+        for i, (mul, ir) in enumerate(self.irreps):
             irrep_size = mul * (2 * ir.l + 1)
             key = ir.l  # Use only the l value as key
-            if key not in irrep_map:
-                irrep_map[key] = []
-            irrep_map[key].append((i, start_idx, start_idx + irrep_size, ir.p))  # Store parity too
+            if key not in self.irrep_map:
+                self.irrep_map[key] = []
+            self.irrep_map[key].append((i, start_idx, start_idx + irrep_size, ir.p))
             start_idx += irrep_size
         
         # Create a copy to track used irreps
-        used_irreps = {key: [] for key in irrep_map}
-        
-        # Prepare transformers for each field
-        field_transformers = []
-        field_sizes = []
+        self.used_irreps = {key: [] for key in self.irrep_map}
         
         # Cache for CartesianTensor objects and RTPs
-        ct_cache = {}
-        rtp_cache = {}
+        self.ct_cache = {}
+        self.rtp_cache = {}
+        self.cache_rtps = cache_rtps
+        
+        # Prepare transformers for each field
+        self.field_transformers = []
         
         # Process each field
-        for part in cartesian_parts:
+        for part in self.cartesian_parts:
             # Parse the field type, size, and CartesianTensor signature
             field_info, ct_signature = part.split(":")
             field_type, size_str = field_info.split("[")
             size = int(size_str.rstrip("]"))
-            field_sizes.append(size)
             
             if field_type == "scalar":
                 # Scalar field - identity transformation
-                # Get scalar irrep (l=0)
                 key = 0
-                idx = len(used_irreps[key])
-                _, start, end, _ = irrep_map[key][idx]
-                used_irreps[key].append(idx)  # Mark as used
+                idx = len(self.used_irreps[key])
+                if idx >= len(self.irrep_map.get(key, [])):
+                    raise ValueError(f"No irrep (l=0) found for field: {part}")
+                _, start, end, _ = self.irrep_map[key][idx]
+                self.used_irreps[key].append(idx)
                 
-                def scalar_transform(irrep_tensor, s=start, e=end):
-                    return irrep_tensor[:, s:e]
-                
-                field_transformers.append(scalar_transform)
+                self.field_transformers.append(self._make_scalar_transformer(start, end))
                 
             elif field_type == "vector":
                 # Vector field - identity transformation
-                # Get vector irrep (l=1)
                 key = 1
-                idx = len(used_irreps[key])
-                _, start, end, _ = irrep_map[key][idx]
-                used_irreps[key].append(idx)  # Mark as used
+                idx = len(self.used_irreps[key])
+                if idx >= len(self.irrep_map.get(key, [])):
+                    raise ValueError(f"No irrep (l=1) found for field: {part}")
+                _, start, end, _ = self.irrep_map[key][idx]
+                self.used_irreps[key].append(idx)
                 
-                def vector_transform(irrep_tensor, s=start, e=end):
-                    return irrep_tensor[:, s:e]
-                
-                field_transformers.append(vector_transform)
+                self.field_transformers.append(self._make_vector_transformer(start, end))
                 
             elif field_type in ["tensor", "symmetric", "skew"]:
                 # Get CartesianTensor for this field type
-                if ct_signature in ct_cache:
-                    ct = ct_cache[ct_signature]
+                if ct_signature in self.ct_cache:
+                    ct = self.ct_cache[ct_signature]
                 else:
                     ct = CartesianTensor(ct_signature)
-                    ct_cache[ct_signature] = ct
+                    self.ct_cache[ct_signature] = ct
                 
                 # Extract irreps for this field
                 field_irreps_info = []
                 
                 # Determine which irreps to extract based on field type
                 if field_type == "tensor":
-                    # General tensor: l=0, l=1, l=2
                     irrep_types = [0, 1, 2]
                 elif field_type == "symmetric":
-                    # Symmetric tensor: l=0, l=2
                     irrep_types = [0, 2]
                 else:  # skew
-                    # Skew-symmetric tensor: l=1
                     irrep_types = [1]
                 
                 # Extract each irrep type
                 for l in irrep_types:
                     key = l
-                    if key in irrep_map and len(irrep_map[key]) > len(used_irreps[key]):
-                        idx = len(used_irreps[key])
-                        _, start, end, _ = irrep_map[key][idx]
-                        used_irreps[key].append(idx)  # Mark as used
-                        field_irreps_info.append((start, end))
-                    else:
-                        raise ValueError(f"No irrep (l={l}) found for field type: {field_type}")
+                    if key not in self.irrep_map or len(self.irrep_map[key]) <= len(self.used_irreps.get(key, [])):
+                        raise ValueError(f"No irrep (l={l}) found for field: {part}")
+                    idx = len(self.used_irreps.get(key, []))
+                    _, start, end, p = self.irrep_map[key][idx]
+                    if key not in self.used_irreps:
+                        self.used_irreps[key] = []
+                    self.used_irreps[key].append(idx)
+                    field_irreps_info.append((start, end))
                 
-                # Pre-compute RTP if caching is enabled
-                rtp = None
-                if cache_rtps:
-                    if ct_signature not in rtp_cache:
-                        # We'll compute this with a dummy tensor during the first call
-                        pass
-                    else:
-                        rtp = rtp_cache[ct_signature]
-                
-                # Create the appropriate transformer function
+                # Create the appropriate transformer
                 if field_type == "tensor":
-                    def tensor_transform(irrep_tensor, irrep_info=field_irreps_info, ct=ct, rtp=rtp):
-                        # Concatenate the irreps for this field
-                        field_data = torch.cat([
-                            irrep_tensor[:, start:end] for start, end in irrep_info
-                        ], dim=1)
-                        
-                        # Convert to Cartesian tensor
-                        if rtp is not None:
-                            field_tensor_3d = ct.to_cartesian(field_data, rtp=rtp)
-                        else:
-                            field_tensor_3d = ct.to_cartesian(field_data)
-                            
-                        # Flatten to 9 components
-                        return field_tensor_3d.reshape(field_tensor_3d.shape[0], 9)
-                    
-                    field_transformers.append(tensor_transform)
-                    
+                    self.field_transformers.append(
+                        self._make_tensor_transformer(field_irreps_info, ct, ct_signature)
+                    )
                 elif field_type == "symmetric":
-                    def symmetric_transform(irrep_tensor, irrep_info=field_irreps_info, ct=ct, rtp=rtp):
-                        # Concatenate the irreps for this field
-                        field_data = torch.cat([
-                            irrep_tensor[:, start:end] for start, end in irrep_info
-                        ], dim=1)
-                        
-                        # Convert to Cartesian tensor
-                        if rtp is not None:
-                            field_tensor_3d = ct.to_cartesian(field_data, rtp=rtp)
-                        else:
-                            field_tensor_3d = ct.to_cartesian(field_data)
-                        
-                        # Extract unique components [xx, xy, xz, yy, yz, zz]
-                        batch_size = field_tensor_3d.shape[0]
-                        field_tensor = torch.zeros((batch_size, 6), device=field_tensor_3d.device, dtype=field_tensor_3d.dtype)
-                        field_tensor[:, 0] = field_tensor_3d[:, 0, 0]  # xx
-                        field_tensor[:, 1] = field_tensor_3d[:, 0, 1]  # xy
-                        field_tensor[:, 2] = field_tensor_3d[:, 0, 2]  # xz
-                        field_tensor[:, 3] = field_tensor_3d[:, 1, 1]  # yy
-                        field_tensor[:, 4] = field_tensor_3d[:, 1, 2]  # yz
-                        field_tensor[:, 5] = field_tensor_3d[:, 2, 2]  # zz
-                        
-                        return field_tensor
-                    
-                    field_transformers.append(symmetric_transform)
-                    
+                    self.field_transformers.append(
+                        self._make_symmetric_transformer(field_irreps_info, ct, ct_signature)
+                    )
                 else:  # skew-symmetric
-                    def skew_transform(irrep_tensor, irrep_info=field_irreps_info, ct=ct, rtp=rtp):
-                        # Concatenate the irreps for this field
-                        field_data = torch.cat([
-                            irrep_tensor[:, start:end] for start, end in irrep_info
-                        ], dim=1)
-                        
-                        # Convert to Cartesian tensor
-                        if rtp is not None:
-                            field_tensor_3d = ct.to_cartesian(field_data, rtp=rtp)
-                        else:
-                            field_tensor_3d = ct.to_cartesian(field_data)
-                        
-                        # Extract unique components [xy, xz, yz]
-                        batch_size = field_tensor_3d.shape[0]
-                        field_tensor = torch.zeros((batch_size, 3), device=field_tensor_3d.device, dtype=field_tensor_3d.dtype)
-                        field_tensor[:, 0] = field_tensor_3d[:, 0, 1]  # xy
-                        field_tensor[:, 1] = field_tensor_3d[:, 0, 2]  # xz
-                        field_tensor[:, 2] = field_tensor_3d[:, 1, 2]  # yz
-                        
-                        return field_tensor
-                    
-                    field_transformers.append(skew_transform)
-        
-        # Create the final transformation function
-        def cartesian_rizzler(irrep_tensor):
-            """
-            Transform irrep tensor to Cartesian representation.
+                    self.field_transformers.append(
+                        self._make_skew_transformer(field_irreps_info, ct, ct_signature)
+                    )
+            else:
+                raise ValueError(f"Unknown field type: {field_type}")
+    
+    def _make_scalar_transformer(self, start, end):
+        """Create a transformer for scalar fields."""
+        def transform(irrep_tensor):
+            return irrep_tensor[:, start:end]
+        return transform
+    
+    def _make_vector_transformer(self, start, end):
+        """Create a transformer for vector fields."""
+        def transform(irrep_tensor):
+            return irrep_tensor[:, start:end]
+        return transform
+    
+    def _make_tensor_transformer(self, irrep_info, ct, signature):
+        """Create a transformer for general tensor fields."""
+        def transform(irrep_tensor):
+            # Concatenate the irreps for this field
+            field_data = torch.cat([
+                irrep_tensor[:, start:end] for start, end in irrep_info
+            ], dim=1)
             
-            Args:
-                irrep_tensor: Input tensor in irrep representation
-                
-            Returns:
-                Tensor in Cartesian representation
-            """
-            # Apply each field transformer
-            field_tensors = [
-                transformer(irrep_tensor) for transformer in field_transformers
-            ]
+            # Convert to Cartesian tensor
+            if signature in self.rtp_cache:
+                field_tensor_3d = ct.to_cartesian(field_data, rtp=self.rtp_cache[signature])
+            else:
+                if self.cache_rtps:
+                    self.rtp_cache[signature] = ct.reduced_tensor_products(field_data)
+                    field_tensor_3d = ct.to_cartesian(field_data, rtp=self.rtp_cache[signature])
+                else:
+                    field_tensor_3d = ct.to_cartesian(field_data)
             
-            # Concatenate the results
-            return torch.cat(field_tensors, dim=1)
+            # Flatten to 9 components
+            return field_tensor_3d.reshape(field_tensor_3d.shape[0], 9)
         
-        # Add a method to initialize RTPs with a sample tensor
-        def initialize_rtps(sample_irrep_tensor):
-            nonlocal rtp_cache
+        return transform
+    
+    def _make_symmetric_transformer(self, irrep_info, ct, signature):
+        """Create a transformer for symmetric tensor fields."""
+        def transform(irrep_tensor):
+            # Concatenate the irreps for this field
+            field_data = torch.cat([
+                irrep_tensor[:, start:end] for start, end in irrep_info
+            ], dim=1)
             
-            for i, part in enumerate(cartesian_parts):
-                field_info, ct_signature = part.split(":")
-                field_type = field_info.split("[")[0]
-                
-                if field_type in ["tensor", "symmetric", "skew"] and ct_signature in ct_cache:
-                    ct = ct_cache[ct_signature]
-                    
-                    # Get the irrep data for this field
-                    if field_type == "tensor":
-                        irrep_types = [0, 1, 2]
-                    elif field_type == "symmetric":
-                        irrep_types = [0, 2]
-                    else:  # skew
-                        irrep_types = [1]
-                    
-                    # Extract the irrep data
-                    field_data = []
-                    for l in irrep_types:
-                        for j, (_, start, end, _) in enumerate(irrep_map.get((l,), [])):
-                            if j < len(irrep_types):  # Only use what we need
-                                field_data.append(sample_irrep_tensor[:, start:end])
-                    
-                    if field_data:
-                        field_data = torch.cat(field_data, dim=1)
-                        rtp_cache[ct_signature] = ct.reduced_tensor_products(field_data)
+            # Convert to Cartesian tensor
+            if signature in self.rtp_cache:
+                field_tensor_3d = ct.to_cartesian(field_data, rtp=self.rtp_cache[signature])
+            else:
+                if self.cache_rtps:
+                    self.rtp_cache[signature] = ct.reduced_tensor_products(field_data)
+                    field_tensor_3d = ct.to_cartesian(field_data, rtp=self.rtp_cache[signature])
+                else:
+                    field_tensor_3d = ct.to_cartesian(field_data)
+            
+            # Extract unique components [xx, xy, xz, yy, yz, zz]
+            batch_size = field_tensor_3d.shape[0]
+            field_tensor = torch.zeros((batch_size, 6), device=field_tensor_3d.device, dtype=field_tensor_3d.dtype)
+            field_tensor[:, 0] = field_tensor_3d[:, 0, 0]  # xx
+            field_tensor[:, 1] = field_tensor_3d[:, 0, 1]  # xy
+            field_tensor[:, 2] = field_tensor_3d[:, 0, 2]  # xz
+            field_tensor[:, 3] = field_tensor_3d[:, 1, 1]  # yy
+            field_tensor[:, 4] = field_tensor_3d[:, 1, 2]  # yz
+            field_tensor[:, 5] = field_tensor_3d[:, 2, 2]  # zz
+            
+            return field_tensor
         
-        # Attach the initialization method
-        cartesian_rizzler.initialize_rtps = initialize_rtps
+        return transform
+    
+    def _make_skew_transformer(self, irrep_info, ct, signature):
+        """Create a transformer for skew-symmetric tensor fields."""
+        def transform(irrep_tensor):
+            # Concatenate the irreps for this field
+            field_data = torch.cat([
+                irrep_tensor[:, start:end] for start, end in irrep_info
+            ], dim=1)
+            
+            # Convert to Cartesian tensor
+            if signature in self.rtp_cache:
+                field_tensor_3d = ct.to_cartesian(field_data, rtp=self.rtp_cache[signature])
+            else:
+                if self.cache_rtps:
+                    self.rtp_cache[signature] = ct.reduced_tensor_products(field_data)
+                    field_tensor_3d = ct.to_cartesian(field_data, rtp=self.rtp_cache[signature])
+                else:
+                    field_tensor_3d = ct.to_cartesian(field_data)
+            
+            # Extract unique components [xy, xz, yz]
+            batch_size = field_tensor_3d.shape[0]
+            field_tensor = torch.zeros((batch_size, 3), device=field_tensor_3d.device, dtype=field_tensor_3d.dtype)
+            field_tensor[:, 0] = field_tensor_3d[:, 0, 1]  # xy
+            field_tensor[:, 1] = field_tensor_3d[:, 0, 2]  # xz
+            field_tensor[:, 2] = field_tensor_3d[:, 1, 2]  # yz
+            
+            return field_tensor
         
-        return cartesian_rizzler
+        return transform
+    
+    def __call__(self, irrep_tensor):
+        """
+        Transform irrep tensor to Cartesian representation.
+        
+        Args:
+            irrep_tensor: Tensor in irrep representation
+            
+        Returns:
+            torch.Tensor: Tensor in Cartesian representation
+        """
+        # Apply each field transformer
+        field_tensors = [
+            transformer(irrep_tensor) for transformer in self.field_transformers
+        ]
+        
+        # Concatenate the results
+        return torch.cat(field_tensors, dim=1)
+    
+    def set_rtps(self, rtps):
+        """
+        Set pre-computed RTPs for this rizzler.
+        
+        Args:
+            rtps: Dictionary of pre-computed RTPs
+        """
+        self.rtp_cache = rtps
+    
+    def get_rtps(self):
+        """
+        Get the current RTP cache.
+        
+        Returns:
+            dict: The current RTP cache
+        """
+        return self.rtp_cache
 
 @dataclass
 class TensorIndex:
@@ -1161,464 +1101,225 @@ class TensorIndex:
 
 
 if __name__ == "__main__":
-    # Add parent directory to path for imports
-    import sys
-    import os
-    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    # Test the TensorData class
+    print("Testing TensorData class...")
     
-    # Now we can import from preprocessing
-    from preprocessing.scalers import EquivariantScalerWrapper, MeanScaler
+    # Create a simple tensor field
+    tensor = torch.randn(10, 3, 3)
+    tensor_data = TensorData(tensor, symmetry=1)
+    print(f"Tensor shape: {tensor_data.shape}")
+    print(f"Tensor rank: {tensor_data.rank.values}")
+    print(f"Tensor symmetry: {tensor_data.symmetry.values}")
     
-    torch.manual_seed(42)
+    # Test to_irreps and from_irreps
+    irrep_tensor, irreps_str, cart_str = tensor_data.to_irreps()
+    print(f"Irrep tensor shape: {irrep_tensor.shape}")
+    print(f"Irreps string: {irreps_str}")
     
-    print("\n=== Testing All Rank-2 Tensor Symmetries ===")
-    
-    # Create challenging test data for all three symmetry types
-    
-    # 1. General rank-2 tensors (no symmetry)
-    general_tensors = torch.tensor([
-        # A tensor with all different values
-        [[1.0, 2.0, 3.0],
-         [4.0, 5.0, 6.0],
-         [7.0, 8.0, 9.0]],
-        # A tensor with some zeros
-        [[2.0, 0.0, 1.5],
-         [3.0, 2.5, 0.0],
-         [0.0, 1.0, 4.0]],
-        # A tensor with negative values
-        [[-1.0, 0.5, -2.0],
-         [1.5, -3.0, 2.5],
-         [-0.5, 1.0, -1.5]]
-    ])
-    
-    # 2. Symmetric tensors
-    symmetric_tensors = torch.tensor([
-        # A symmetric tensor with all different values
-        [[1.0, 2.0, 3.0],
-         [2.0, 4.0, 5.0],
-         [3.0, 5.0, 6.0]],
-        # A diagonal tensor
-        [[3.0, 0.0, 0.0],
-         [0.0, 2.0, 0.0],
-         [0.0, 0.0, 1.0]],
-        # A symmetric tensor with negative values
-        [[-2.0, 1.5, -0.5],
-         [1.5, 3.0, 2.0],
-         [-0.5, 2.0, -1.0]]
-    ])
-    
-    # 3. Skew-symmetric tensors
-    skew_tensors = torch.tensor([
-        # A simple rotation in xy plane
-        [[0.0, 2.0, 0.0],
-         [-2.0, 0.0, 0.0],
-         [0.0, 0.0, 0.0]],
-        # A complex rotation
-        [[0.0, 1.5, 2.0],
-         [-1.5, 0.0, 3.0],
-         [-2.0, -3.0, 0.0]],
-        # A skew tensor with smaller values
-        [[0.0, 0.5, -0.3],
-         [-0.5, 0.0, 0.7],
-         [0.3, -0.7, 0.0]]
-    ])
-    
-    # Create TensorData objects
-    general_td = TensorData(general_tensors, symmetry=0)
-    symmetric_td = TensorData(symmetric_tensors, symmetry=1)
-    skew_td = TensorData(skew_tensors, symmetry=-1)
-    
-    # Test each type individually
-    tensor_types = {
-        "General": general_td,
-        "Symmetric": symmetric_td,
-        "Skew-symmetric": skew_td
-    }
-    
-    for name, td in tensor_types.items():
-        print(f"\n--- Testing {name} Tensors ---")
-        print(f"Original shape: {td.shape}")
-        
-        # Convert to irreps
-        irrep_tensor, irrep_str, cartesian_str = td.to_irreps()
-        print(f"Irrep shape: {irrep_tensor.shape}")
-        print(f"Irrep string: {irrep_str}")
-        print(f"Cartesian string: {cartesian_str}")
-        
-        # Convert back
-        reconstructed = TensorData.from_irreps(irrep_tensor, irrep_str, cartesian_str)
-        
-        # Compare
-        print(f"Reconstructed shape: {reconstructed.shape}")
-        print(f"Original tensor:\n{td.tensor}")
-        print(f"Reconstructed tensor:\n{reconstructed.tensor}")
-        diff = torch.max(torch.abs(td.tensor - reconstructed.tensor))
-        print(f"Max difference: {diff}")
-        print(f"Round-trip successful: {diff < 1e-5}")
-    
-    # Test all types combined
-    print("\n--- Testing Combined Tensor Types ---")
-    combined = TensorData.cat([general_td, symmetric_td, skew_td])
-    print(f"Combined shape: {combined.shape}")
-    print(f"Field ptr: {combined.ptr.ptr}")
-    print(f"Ranks: {combined.rank.values}")
-    print(f"Symmetries: {combined.symmetry.values}")
-    
-    # Convert to irreps
-    irrep_tensor, irrep_str, cartesian_str = combined.to_irreps()
-    print(f"Irrep shape: {irrep_tensor.shape}")
-    print(f"Irrep string: {irrep_str}")
-    
-    # Convert back
-    reconstructed = TensorData.from_irreps(irrep_tensor, irrep_str, cartesian_str)
-    
-    # Compare
+    reconstructed = TensorData.from_irreps(irrep_tensor, irreps_str, cart_str)
     print(f"Reconstructed shape: {reconstructed.shape}")
-    diff = torch.max(torch.abs(combined.tensor - reconstructed.tensor))
-    print(f"Max difference: {diff}")
-    print(f"Round-trip successful: {diff < 1e-5}")
+    print(f"Max difference: {torch.max(torch.abs(tensor_data.tensor - reconstructed.tensor))}")
     
-    # Test with scaling
-    print("\n--- Testing with Scaling ---")
-    scaler = EquivariantScalerWrapper(MeanScaler())
-    scaled = scaler.fit_transform(combined)
+    # Test with multiple fields
+    vector = TensorData(torch.randn(10, 3))
+    scalar = TensorData(torch.randn(10, 1))
+    combined = TensorData.cat([vector, scalar])
+    print(f"Combined shape: {combined.shape}")
+    print(f"Combined ptr: {combined.ptr.ptr}")
+    
+    # Test the rizzlers
+    print("\n--- Testing Rizzlers ---")
+    
+    # Create a complex tensor field
+    batch_size = 100
+    complex_tensor = TensorData(torch.randn(batch_size, 3, 3), symmetry=1)
+    print(f"Complex tensor shape: {complex_tensor.shape}")
+    
+    # Get the rizzlers
+    print("\n--- Creating Complex Tensor Rizzlers ---")
+    complex_irrep_rizzler = complex_tensor.get_irrep_rizzler()
+    complex_cartesian_rizzler = complex_tensor.get_cartesian_rizzler(cache_rtps=True)
+    
+    # Test the standard approach
+    print("\n--- Standard TensorData Approach (Complex Tensor) ---")
+    start_time = time.time()
+    irrep_tensor, irreps_str, cart_str = complex_tensor.to_irreps()
+    reconstructed_td = TensorData.from_irreps(irrep_tensor, irreps_str, cart_str)
+    standard_time = time.time() - start_time
+    print(f"Standard approach time: {standard_time:.6f} seconds")
+    
+    # Test the rizzler approach
+    print("\n--- Rizzler Approach (Complex Tensor) ---")
+    start_time = time.time()
+    irrep_tensor_rizzled, irreps_str_rizzled = complex_irrep_rizzler(complex_tensor.tensor)
+    # Pre-compute RTPs by running the rizzler once with the sample data
+    _ = complex_cartesian_rizzler(irrep_tensor_rizzled)  # This caches RTPs
+    reconstructed_tensor = complex_cartesian_rizzler(irrep_tensor_rizzled)
+    rizzler_time = time.time() - start_time
+    print(f"Rizzler approach time: {rizzler_time:.6f} seconds")
+    
+    # Compare results
+    standard_diff = torch.max(torch.abs(complex_tensor.tensor - reconstructed_td.tensor))
+    rizzler_diff = torch.max(torch.abs(complex_tensor.tensor - reconstructed_tensor))
+    print("\n--- Comparison (Complex Tensor) ---")
+    print(f"Standard approach max difference: {standard_diff}")
+    print(f"Rizzler approach max difference: {rizzler_diff}")
+    print(f"Results match: {torch.allclose(reconstructed_td.tensor, reconstructed_tensor, atol=1e-5)}")
+    print(f"Speed improvement: {standard_time/rizzler_time:.2f}x faster")
+    
+    # Create a simple vector field
+    batch_size = 1000  # Larger batch to better measure performance
+    vector_field = TensorData(torch.randn(batch_size, 3))  # Simple 3D vectors
+    print(f"Vector field shape: {vector_field.shape}")
+    
+    # Get the rizzlers
+    print("\n--- Creating Vector Rizzlers ---")
+    vector_irrep_rizzler = vector_field.get_irrep_rizzler()
+    vector_cartesian_rizzler = vector_field.get_cartesian_rizzler(cache_rtps=True)
+    
+    # Test the standard approach
+    print("\n--- Standard TensorData Approach (Vectors) ---")
+    start_time = time.time()
+    irrep_tensor, irreps_str, cart_str = vector_field.to_irreps()
+    reconstructed_td = TensorData.from_irreps(irrep_tensor, irreps_str, cart_str)
+    standard_time = time.time() - start_time
+    print(f"Standard approach time: {standard_time:.6f} seconds")
+    
+    # Test the rizzler approach
+    print("\n--- Rizzler Approach (Vectors) ---")
+    start_time = time.time()
+    irrep_tensor_rizzled, irreps_str_rizzled = vector_irrep_rizzler(vector_field.tensor)
+    # Pre-compute RTPs by running the rizzler once
+    _ = vector_cartesian_rizzler(irrep_tensor_rizzled)  # This caches RTPs
+    reconstructed_tensor = vector_cartesian_rizzler(irrep_tensor_rizzled)
+    rizzler_time = time.time() - start_time
+    print(f"Rizzler approach time: {rizzler_time:.6f} seconds")
+    
+    # Compare results
+    standard_diff = torch.max(torch.abs(vector_field.tensor - reconstructed_td.tensor))
+    rizzler_diff = torch.max(torch.abs(vector_field.tensor - reconstructed_tensor))
+    print(f"\n--- Comparison (Vectors) ---")
+    print(f"Standard approach max difference: {standard_diff}")
+    print(f"Rizzler approach max difference: {rizzler_diff}")
+    print(f"Results match: {torch.allclose(reconstructed_td.tensor, reconstructed_tensor, atol=1e-5)}")
+    if rizzler_time > 0:
+        print(f"Speed improvement: {standard_time/rizzler_time:.2f}x faster")
+    else:
+        print(f"Speed improvement: ∞ (rizzler time too small to measure)")
+    
+    # Test with multiple batches
+    print("\n--- Testing with Multiple Vector Batches ---")
+    batch_times_standard = []
+    batch_times_rizzler = []
+    
+    for i in range(10):  # More iterations for better measurement
+        # Create new random data with same structure
+        new_data = torch.randn_like(vector_field.tensor)
+        
+        # Standard approach
+        start_time = time.time()
+        new_td = TensorData(new_data)
+        irrep_tensor, irreps_str, cart_str = new_td.to_irreps()
+        reconstructed_td = TensorData.from_irreps(irrep_tensor, irreps_str, cart_str)
+        batch_times_standard.append(time.time() - start_time)
+        
+        # Rizzler approach
+        start_time = time.time()
+        irrep_tensor_rizzled = vector_irrep_rizzler(new_data)[0]
+        reconstructed_tensor = vector_cartesian_rizzler(irrep_tensor_rizzled)
+        batch_times_rizzler.append(time.time() - start_time)
+        
+        # Verify results match
+        match = torch.allclose(reconstructed_td.tensor, reconstructed_tensor, atol=1e-5)
+        print(f"Batch {i+1}: Results match: {match}, Standard: {batch_times_standard[-1]:.6f}s, Rizzler: {batch_times_rizzler[-1]:.6f}s")
+    
+    # Show average times
+    avg_standard = sum(batch_times_standard) / len(batch_times_standard)
+    avg_rizzler = sum(batch_times_rizzler) / len(batch_times_rizzler)
+    print(f"\nAverage times - Standard: {avg_standard:.6f}s, Rizzler: {avg_rizzler:.6f}s")
+    if avg_rizzler > 0:
+        print(f"Average speedup: {avg_standard/avg_rizzler:.2f}x faster")
+    else:
+        print(f"Average speedup: ∞ (rizzler time too small to measure)")
+    
+    # Direct comparison (no TensorData objects at all)
+    print("\n--- Direct Function Comparison (No TensorData) ---")
+    
+    # Create a direct function that does the same transformation
+    def direct_transform(tensor):
+        # For vectors, the irrep representation is identical to the Cartesian representation
+        return tensor
+    
+    # Test with multiple batches
+    direct_times = []
+    rizzler_times = []
+    
+    for i in range(10):
+        # Create new random data
+        new_data = torch.randn_like(vector_field.tensor)
+        
+        # Direct approach (just identity function for vectors)
+        start_time = time.time()
+        result = direct_transform(new_data)
+        direct_times.append(time.time() - start_time)
+        
+        # Rizzler approach (without creating TensorData)
+        start_time = time.time()
+        irrep_tensor_rizzled = vector_irrep_rizzler(new_data)[0]
+        result_rizzler = vector_cartesian_rizzler(irrep_tensor_rizzled)
+        rizzler_times.append(time.time() - start_time)
+        
+        print(f"Batch {i+1}: Direct: {direct_times[-1]:.6f}s, Rizzler: {rizzler_times[-1]:.6f}s")
+    
+    # Show average times
+    avg_direct = sum(direct_times) / len(direct_times)
+    avg_rizzler = sum(rizzler_times) / len(rizzler_times)
+    print(f"\nAverage times - Direct: {avg_direct:.6f}s, Rizzler: {avg_rizzler:.6f}s")
+    if avg_direct > 0:
+        print(f"Rizzler overhead: {avg_rizzler/avg_direct:.2f}x slower than direct")
+    else:
+        print(f"Rizzler overhead: Cannot calculate (direct time too small to measure)")
+    
+    # Test RTP caching explicitly
+    print("\n--- Testing RTP Caching ---")
+    
+    # Create a new tensor with the same structure
+    test_tensor = TensorData(torch.randn(batch_size, 3, 3), symmetry=1)
+    test_irrep_rizzler = test_tensor.get_irrep_rizzler()
+    
+    # Create cartesian rizzler with caching
+    print("Creating rizzler with caching...")
+    test_cartesian_rizzler = test_tensor.get_cartesian_rizzler(cache_rtps=True)
     
     # Convert to irreps
-    scaled_irrep, scaled_irrep_str, scaled_cart_str = scaled.to_irreps()
+    test_irrep_tensor, _ = test_irrep_rizzler(test_tensor.tensor)
     
-    # Convert back
-    reconstructed_scaled = TensorData.from_irreps(scaled_irrep, scaled_irrep_str, scaled_cart_str)
+    # First run (should compute RTPs)
+    print("First run (computing RTPs)...")
+    start_time = time.time()
+    _ = test_cartesian_rizzler(test_irrep_tensor)
+    first_time = time.time() - start_time
+    print(f"First run time: {first_time:.6f} seconds")
     
-    # Inverse transform
-    original_scale = scaler.inverse_transform(reconstructed_scaled)
+    # Get the cached RTPs
+    rtps = test_cartesian_rizzler.get_rtps()
+    print(f"RTP cache has {len(rtps)} entries")
     
-    # Compare
-    diff = torch.max(torch.abs(combined.tensor - original_scale.tensor))
-    print(f"Max difference after scaling round-trip: {diff}")
-    print(f"Full pipeline successful: {diff < 1e-5}")
-
-    # Test for project_to_2d
-    if False:  # Test for project_to_2d
-        print("\n=== Testing project_to_2d Method ===")
-        
-        # Create test data with clear 3D components
-        
-        # 1. Vector field
-        vectors = torch.tensor([
-            [1.0, 2.0, 3.0],    # Clear z component
-            [4.0, 5.0, 0.0],    # No z component
-            [-1.0, 0.0, 2.0]    # Negative x, zero y, positive z
-        ])
-        
-        # 2. General tensor
-        general_tensor = torch.tensor([
-            [[1.0, 2.0, 3.0],   # Has z components
-             [4.0, 5.0, 6.0],
-             [7.0, 8.0, 9.0]],
-            [[2.0, 0.0, 0.0],   # No z components in first row
-             [0.0, 3.0, 1.0],
-             [0.0, 2.0, 4.0]],
-            [[1.0, 0.0, 0.0],   # Only diagonal components
-             [0.0, 2.0, 0.0],
-             [0.0, 0.0, 3.0]]
-        ])
-        
-        # 3. Symmetric tensor
-        symmetric_tensor = torch.tensor([
-            [[1.0, 2.0, 3.0],   # Symmetric with z components
-             [2.0, 4.0, 5.0],
-             [3.0, 5.0, 6.0]],
-            [[3.0, 0.0, 0.0],   # Diagonal
-             [0.0, 2.0, 0.0],
-             [0.0, 0.0, 1.0]],
-            [[2.0, 1.0, 0.0],   # No z components
-             [1.0, 2.0, 0.0],
-             [0.0, 0.0, 0.0]]
-        ])
-        
-        # 4. Skew-symmetric tensor
-        skew_tensor = torch.tensor([
-            [[0.0, 2.0, 3.0],    # With z components
-             [-2.0, 0.0, 1.0],
-             [-3.0, -1.0, 0.0]],
-            [[0.0, 1.0, 0.0],    # Only xy component
-             [-1.0, 0.0, 0.0],
-             [0.0, 0.0, 0.0]],
-            [[0.0, 0.0, 2.0],    # Only xz and yz components
-             [0.0, 0.0, 3.0],
-             [-2.0, -3.0, 0.0]]
-        ])
-        
-        # Create TensorData objects
-        vector_td = TensorData(vectors)
-        general_td = TensorData(general_tensor, symmetry=0)
-        symmetric_td = TensorData(symmetric_tensor, symmetry=1)
-        skew_td = TensorData(skew_tensor, symmetry=-1)
-        
-        # Test each type individually
-        tensor_types = {
-            "Vector": vector_td,
-            "General": general_td,
-            "Symmetric": symmetric_td,
-            "Skew-symmetric": skew_td
-        }
-        
-        for name, td in tensor_types.items():
-            print(f"\n--- Testing {name} Projection to 2D ---")
-            print(f"Original tensor:\n{td.tensor}")
-            
-            # Project to 2D
-            projected = td.project_to_2d()
-            print(f"Projected tensor:\n{projected.tensor}")
-            
-            # Verify z components are zero
-            if name == "Vector":
-                # Check that z components (index 2) are zero
-                z_components = projected.tensor[:, 2]
-                print(f"Z components: {z_components}")
-                print(f"All z components zero: {torch.all(z_components == 0.0)}")
-                
-            elif name == "General":
-                # Check that all components involving z are zero
-                # In flattened form: [xx, xy, xz, yx, yy, yz, zx, zy, zz]
-                z_indices = [2, 5, 6, 7, 8]  # xz, yz, zx, zy, zz
-                z_components = projected.tensor[:, z_indices]
-                print(f"Z components shape: {z_components.shape}")
-                print(f"All z components zero: {torch.all(z_components == 0.0)}")
-                
-            elif name == "Symmetric":
-                # In flattened form: [xx, xy, xz, yy, yz, zz]
-                z_indices = [2, 4, 5]  # xz, yz, zz
-                z_components = projected.tensor[:, z_indices]
-                print(f"Z components shape: {z_components.shape}")
-                print(f"All z components zero: {torch.all(z_components == 0.0)}")
-                
-            elif name == "Skew-symmetric":
-                # In flattened form: [xy, xz, yz]
-                z_indices = [1, 2]  # xz, yz
-                z_components = projected.tensor[:, z_indices]
-                print(f"Z components shape: {z_components.shape}")
-                print(f"All z components zero: {torch.all(z_components == 0.0)}")
-        
-        # Test combined tensor
-        print("\n--- Testing Combined Tensor Projection ---")
-        combined = TensorData.cat([vector_td, general_td, symmetric_td, skew_td])
-        print(f"Combined shape: {combined.shape}")
-        print(f"Field ptr: {combined.ptr.ptr}")
-        
-        # Project to 2D
-        projected_combined = combined.project_to_2d()
-        print(f"Projected shape: {projected_combined.shape}")
-        
-        # Verify structure is preserved
-        print(f"Original ptr: {combined.ptr.ptr}")
-        print(f"Projected ptr: {projected_combined.ptr.ptr}")
-        print(f"Pointers match: {torch.equal(combined.ptr.ptr, projected_combined.ptr.ptr)}")
-        
-        print(f"Original ranks: {combined.rank.values}")
-        print(f"Projected ranks: {projected_combined.rank.values}")
-        print(f"Ranks match: {torch.equal(combined.rank.values, projected_combined.rank.values)}")
-        
-        print(f"Original symmetries: {combined.symmetry.values}")
-        print(f"Projected symmetries: {projected_combined.symmetry.values}")
-        print(f"Symmetries match: {torch.equal(combined.symmetry.values, projected_combined.symmetry.values)}")
-
-    if True:  # Test rizzlers
-        print("\n=== Testing Rizzler Functions ===")
-        
-        # Create test data with multiple tensor types
-        vector = TensorData(torch.randn(5, 3))
-        symmetric = TensorData(torch.randn(5, 3, 3), symmetry=1)
-        skew = TensorData(torch.randn(5, 3, 3), symmetry=-1)
-        
-        # Combine them
-        combined = TensorData.cat([vector, symmetric, skew])
-        print(f"Combined tensor shape: {combined.shape}")
-        print(f"Field structure: {combined.ptr.ptr}")
-        
-        # Get the rizzlers
-        print("\n--- Creating Rizzlers ---")
-        irrep_rizzler = combined.get_irrep_rizzler()
-        cartesian_rizzler = combined.get_cartesian_rizzler(cache_rtps=True)
-        
-        # Test the standard approach
-        print("\n--- Standard TensorData Approach ---")
-        start_time = time.time()
-        irrep_tensor, irreps_str, cart_str = combined.to_irreps()
-        reconstructed_td = TensorData.from_irreps(irrep_tensor, irreps_str, cart_str)
-        standard_time = time.time() - start_time
-        print(f"Standard approach time: {standard_time:.6f} seconds")
-        
-        # Test the rizzler approach
-        print("\n--- Rizzler Approach ---")
-        start_time = time.time()
-        irrep_tensor_rizzled, irreps_str_rizzled = irrep_rizzler(combined.tensor)
-        # Initialize RTPs with the first batch
-        cartesian_rizzler.initialize_rtps(irrep_tensor_rizzled)
-        reconstructed_tensor = cartesian_rizzler(irrep_tensor_rizzled)
-        rizzler_time = time.time() - start_time
-        print(f"Rizzler approach time: {rizzler_time:.6f} seconds")
-        
-        # Compare results
-        standard_diff = torch.max(torch.abs(combined.tensor - reconstructed_td.tensor))
-        rizzler_diff = torch.max(torch.abs(combined.tensor - reconstructed_tensor))
-        print(f"\n--- Comparison ---")
-        print(f"Standard approach max difference: {standard_diff}")
-        print(f"Rizzler approach max difference: {rizzler_diff}")
-        print(f"Results match: {torch.allclose(reconstructed_td.tensor, reconstructed_tensor, atol=1e-5)}")
-        if rizzler_time > 0:
-            print(f"Speed improvement: {standard_time/rizzler_time:.2f}x faster")
-        else:
-            print(f"Speed improvement: ∞ (rizzler time too small to measure)")
-        
-        # Test with multiple batches to show caching benefit
-        print("\n--- Testing with Multiple Batches ---")
-        batch_times_standard = []
-        batch_times_rizzler = []
-        
-        for i in range(5):
-            # Create new random data with same structure
-            new_data = torch.randn_like(combined.tensor)
-            
-            # Standard approach
-            start_time = time.time()
-            new_td = TensorData(new_data, is_multi_field=True)
-            new_td.ptr = combined.ptr
-            new_td.rank = combined.rank
-            new_td.symmetry = combined.symmetry
-            irrep_tensor, irreps_str, cart_str = new_td.to_irreps()
-            reconstructed_td = TensorData.from_irreps(irrep_tensor, irreps_str, cart_str)
-            batch_times_standard.append(time.time() - start_time)
-            
-            # Rizzler approach
-            start_time = time.time()
-            irrep_tensor_rizzled = irrep_rizzler(new_data)[0]
-            reconstructed_tensor = cartesian_rizzler(irrep_tensor_rizzled)
-            batch_times_rizzler.append(time.time() - start_time)
-            
-            # Verify results match
-            match = torch.allclose(reconstructed_td.tensor, reconstructed_tensor, atol=1e-5)
-            print(f"Batch {i+1}: Results match: {match}, Standard: {batch_times_standard[-1]:.6f}s, Rizzler: {batch_times_rizzler[-1]:.6f}s")
-        
-        # Show average times
-        avg_standard = sum(batch_times_standard) / len(batch_times_standard)
-        avg_rizzler = sum(batch_times_rizzler) / len(batch_times_rizzler)
-        print(f"\nAverage times - Standard: {avg_standard:.6f}s, Rizzler: {avg_rizzler:.6f}s")
-        if avg_rizzler > 0:
-            print(f"Average speedup: {avg_standard/avg_rizzler:.2f}x faster")
-        else:
-            print(f"Average speedup: ∞ (rizzler time too small to measure)")
-
-    if True:  # Test rizzlers with simple vectors (no CartesianTensor overhead)
-        print("\n=== Testing Rizzlers with Simple Vector Fields ===")
-        
-        # Create a simple vector field
-        batch_size = 1000  # Larger batch to better measure performance
-        vector_field = TensorData(torch.randn(batch_size, 3))  # Simple 3D vectors
-        print(f"Vector field shape: {vector_field.shape}")
-        
-        # Get the rizzlers
-        print("\n--- Creating Vector Rizzlers ---")
-        vector_irrep_rizzler = vector_field.get_irrep_rizzler()
-        vector_cartesian_rizzler = vector_field.get_cartesian_rizzler()
-        
-        # Test the standard approach
-        print("\n--- Standard TensorData Approach (Vectors) ---")
-        start_time = time.time()
-        irrep_tensor, irreps_str, cart_str = vector_field.to_irreps()
-        reconstructed_td = TensorData.from_irreps(irrep_tensor, irreps_str, cart_str)
-        standard_time = time.time() - start_time
-        print(f"Standard approach time: {standard_time:.6f} seconds")
-        
-        # Test the rizzler approach
-        print("\n--- Rizzler Approach (Vectors) ---")
-        start_time = time.time()
-        irrep_tensor_rizzled, irreps_str_rizzled = vector_irrep_rizzler(vector_field.tensor)
-        reconstructed_tensor = vector_cartesian_rizzler(irrep_tensor_rizzled)
-        rizzler_time = time.time() - start_time
-        print(f"Rizzler approach time: {rizzler_time:.6f} seconds")
-        
-        # Compare results
-        standard_diff = torch.max(torch.abs(vector_field.tensor - reconstructed_td.tensor))
-        rizzler_diff = torch.max(torch.abs(vector_field.tensor - reconstructed_tensor))
-        print(f"\n--- Comparison (Vectors) ---")
-        print(f"Standard approach max difference: {standard_diff}")
-        print(f"Rizzler approach max difference: {rizzler_diff}")
-        print(f"Results match: {torch.allclose(reconstructed_td.tensor, reconstructed_tensor, atol=1e-5)}")
-        if rizzler_time > 0:
-            print(f"Speed improvement: {standard_time/rizzler_time:.2f}x faster")
-        else:
-            print(f"Speed improvement: ∞ (rizzler time too small to measure)")
-        
-        # Test with multiple batches
-        print("\n--- Testing with Multiple Vector Batches ---")
-        batch_times_standard = []
-        batch_times_rizzler = []
-        
-        for i in range(10):  # More iterations for better measurement
-            # Create new random data with same structure
-            new_data = torch.randn_like(vector_field.tensor)
-            
-            # Standard approach
-            start_time = time.time()
-            new_td = TensorData(new_data)
-            irrep_tensor, irreps_str, cart_str = new_td.to_irreps()
-            reconstructed_td = TensorData.from_irreps(irrep_tensor, irreps_str, cart_str)
-            batch_times_standard.append(time.time() - start_time)
-            
-            # Rizzler approach
-            start_time = time.time()
-            irrep_tensor_rizzled = vector_irrep_rizzler(new_data)[0]
-            reconstructed_tensor = vector_cartesian_rizzler(irrep_tensor_rizzled)
-            batch_times_rizzler.append(time.time() - start_time)
-            
-            # Verify results match
-            match = torch.allclose(reconstructed_td.tensor, reconstructed_tensor, atol=1e-5)
-            print(f"Batch {i+1}: Results match: {match}, Standard: {batch_times_standard[-1]:.6f}s, Rizzler: {batch_times_rizzler[-1]:.6f}s")
-        
-        # Show average times
-        avg_standard = sum(batch_times_standard) / len(batch_times_standard)
-        avg_rizzler = sum(batch_times_rizzler) / len(batch_times_rizzler)
-        print(f"\nAverage times - Standard: {avg_standard:.6f}s, Rizzler: {avg_rizzler:.6f}s")
-        if avg_rizzler > 0:
-            print(f"Average speedup: {avg_standard/avg_rizzler:.2f}x faster")
-        else:
-            print(f"Average speedup: ∞ (rizzler time too small to measure)")
-        
-        # Direct comparison (no TensorData objects at all)
-        print("\n--- Direct Function Comparison (No TensorData) ---")
-        
-        # Create a direct function that does the same transformation
-        def direct_transform(tensor):
-            # For vectors, the irrep representation is identical to the Cartesian representation
-            return tensor
-        
-        # Test with multiple batches
-        direct_times = []
-        rizzler_times = []
-        
-        for i in range(10):
-            # Create new random data
-            new_data = torch.randn_like(vector_field.tensor)
-            
-            # Direct approach (just identity function for vectors)
-            start_time = time.time()
-            result = direct_transform(new_data)
-            direct_times.append(time.time() - start_time)
-            
-            # Rizzler approach (without creating TensorData)
-            start_time = time.time()
-            irrep_tensor_rizzled = vector_irrep_rizzler(new_data)[0]
-            result_rizzler = vector_cartesian_rizzler(irrep_tensor_rizzled)
-            rizzler_times.append(time.time() - start_time)
-            
-            print(f"Batch {i+1}: Direct: {direct_times[-1]:.6f}s, Rizzler: {rizzler_times[-1]:.6f}s")
-        
-        # Show average times
-        avg_direct = sum(direct_times) / len(direct_times)
-        avg_rizzler = sum(rizzler_times) / len(rizzler_times)
-        print(f"\nAverage times - Direct: {avg_direct:.6f}s, Rizzler: {avg_rizzler:.6f}s")
-        if avg_direct > 0:
-            print(f"Rizzler overhead: {avg_rizzler/avg_direct:.2f}x slower than direct")
-        else:
-            print(f"Rizzler overhead: Cannot calculate (direct time too small to measure)")
+    # Second run (should use cached RTPs)
+    print("Second run (using cached RTPs)...")
+    start_time = time.time()
+    _ = test_cartesian_rizzler(test_irrep_tensor)
+    second_time = time.time() - start_time
+    print(f"Second run time: {second_time:.6f} seconds")
+    
+    # Create a new rizzler and set RTPs explicitly
+    print("Creating new rizzler and setting RTPs explicitly...")
+    new_cartesian_rizzler = test_tensor.get_cartesian_rizzler(cache_rtps=False)
+    new_cartesian_rizzler.set_rtps(rtps)
+    
+    # Run with pre-set RTPs
+    print("Run with pre-set RTPs...")
+    start_time = time.time()
+    _ = new_cartesian_rizzler(test_irrep_tensor)
+    preset_time = time.time() - start_time
+    print(f"Pre-set RTPs run time: {preset_time:.6f} seconds")
