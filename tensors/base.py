@@ -40,6 +40,7 @@ from typing import List
 from e3nn.io import CartesianTensor
 from e3nn import o3  # Import here to avoid circular imports
 import time
+from utils import project_tensor_to_2d  # Use the correct import path
 
 
 def safe_divide(numerator, denominator, safe_value=0):
@@ -750,18 +751,21 @@ class TensorData:
         # Create a rizzler object instead of a function
         return IrrepRizzler(self)
 
-    def get_cartesian_rizzler(self, cache_rtps=False):
+    def get_cartesian_rizzler(self, cache_rtps=False, project_2d=False, projection_plane='xy', preserve_trace=True):
         """
         Creates an optimized object that converts irrep tensor back to Cartesian representation.
         
         Args:
             cache_rtps: If True, pre-compute reduced tensor products for better performance
+            project_2d: If True, project the result to 2D
+            projection_plane: Plane to project to ('xy', 'xz', or 'yz')
+            preserve_trace: Whether to preserve the trace during projection
             
         Returns:
             CartesianRizzler: An object that transforms irrep tensor to Cartesian representation
         """
         # Create a rizzler object instead of a function
-        return CartesianRizzler(self, cache_rtps=cache_rtps)
+        return CartesianRizzler(self, cache_rtps=cache_rtps, project_2d=project_2d, projection_plane=projection_plane, preserve_trace=preserve_trace)
 
 
 class IrrepRizzler:
@@ -810,13 +814,16 @@ class CartesianRizzler:
     """
     Object that efficiently converts irrep tensor back to Cartesian representation.
     """
-    def __init__(self, tensor_data, cache_rtps=False):
+    def __init__(self, tensor_data, cache_rtps=False, project_2d=False, projection_plane='xy', preserve_trace=True):
         """
         Initialize the CartesianRizzler with a TensorData object.
         
         Args:
             tensor_data: TensorData object to base the transformation on
             cache_rtps: If True, pre-compute reduced tensor products for better performance
+            project_2d: If True, project the result to 2D
+            projection_plane: Plane to project to ('xy', 'xz', or 'yz')
+            preserve_trace: Whether to preserve the trace during projection
         """
         # Store original tensor data properties
         self.tensor_data = tensor_data
@@ -825,6 +832,11 @@ class CartesianRizzler:
         _, self.irreps_str, self.cartesian_str = tensor_data.to_irreps()
         self.irreps = o3.Irreps(self.irreps_str)
         self.cartesian_parts = self.cartesian_str.split("+")
+        
+        # Store projection settings
+        self.project_2d = project_2d
+        self.projection_plane = projection_plane
+        self.preserve_trace = preserve_trace
         
         # Map irreps to their positions for quick lookup
         self.irrep_map = {}
@@ -1036,8 +1048,18 @@ class CartesianRizzler:
         ]
         
         # Concatenate the results
-        return torch.cat(field_tensors, dim=1)
-    
+        cartesian_tensor = torch.cat(field_tensors, dim=1)
+        
+        # Apply 2D projection if requested
+        if self.project_2d:
+            cartesian_tensor = project_tensor_to_2d(
+                cartesian_tensor, 
+                plane=self.projection_plane,
+                preserve_trace=self.preserve_trace
+            )
+        
+        return cartesian_tensor
+
     def set_rtps(self, rtps):
         """
         Set pre-computed RTPs for this rizzler.
@@ -1046,7 +1068,7 @@ class CartesianRizzler:
             rtps: Dictionary of pre-computed RTPs
         """
         self.rtp_cache = rtps
-    
+
     def get_rtps(self):
         """
         Get the current RTP cache.
@@ -1055,6 +1077,28 @@ class CartesianRizzler:
             dict: The current RTP cache
         """
         return self.rtp_cache
+
+    def project_to_2d(self, irrep_tensor, plane=None, preserve_trace=None):
+        """
+        Transform irrep tensor to Cartesian and project to 2D.
+        
+        Args:
+            irrep_tensor: Tensor in irrep representation
+            plane: Projection plane ('xy', 'xz', or 'yz'), defaults to self.projection_plane
+            preserve_trace: Whether to preserve the trace, defaults to self.preserve_trace
+            
+        Returns:
+            torch.Tensor: Projected tensor in Cartesian representation
+        """
+        # Use instance defaults if not specified
+        plane = plane or self.projection_plane
+        preserve_trace = preserve_trace if preserve_trace is not None else self.preserve_trace
+        
+        # Transform to Cartesian
+        cartesian_tensor = self(irrep_tensor)
+        
+        # Project to 2D
+        return project_tensor_to_2d(cartesian_tensor, plane=plane, preserve_trace=preserve_trace)
 
 @dataclass
 class TensorIndex:
@@ -1229,9 +1273,7 @@ if __name__ == "__main__":
         reconstructed_tensor = vector_cartesian_rizzler(irrep_tensor_rizzled)
         batch_times_rizzler.append(time.time() - start_time)
         
-        # Verify results match
-        match = torch.allclose(reconstructed_td.tensor, reconstructed_tensor, atol=1e-5)
-        print(f"Batch {i+1}: Results match: {match}, Standard: {batch_times_standard[-1]:.6f}s, Rizzler: {batch_times_rizzler[-1]:.6f}s")
+        print(f"Batch {i+1}: Results match: {torch.allclose(reconstructed_td.tensor, reconstructed_tensor, atol=1e-5)}, Standard: {batch_times_standard[-1]:.6f}s, Rizzler: {batch_times_rizzler[-1]:.6f}s")
     
     # Show average times
     avg_standard = sum(batch_times_standard) / len(batch_times_standard)
@@ -1323,3 +1365,259 @@ if __name__ == "__main__":
     _ = new_cartesian_rizzler(test_irrep_tensor)
     preset_time = time.time() - start_time
     print(f"Pre-set RTPs run time: {preset_time:.6f} seconds")
+
+    # Test 2D projection performance
+    print("\n--- Testing 2D Projection Performance ---")
+    
+    # Create test tensors of different types
+    batch_size = 1000  # Large batch for better timing
+    
+    # Vector field
+    vector_field = TensorData(torch.randn(batch_size, 3))
+    print(f"Vector field shape: {vector_field.shape}")
+    
+    # Symmetric tensor field
+    sym_tensor_field = TensorData(torch.randn(batch_size, 3, 3), symmetry=1)
+    print(f"Symmetric tensor field shape: {sym_tensor_field.shape}")
+    
+    # General tensor field
+    gen_tensor_field = TensorData(torch.randn(batch_size, 3, 3))
+    print(f"General tensor field shape: {gen_tensor_field.shape}")
+    
+    # Test vector projection
+    print("\n--- Vector Field Projection ---")
+    
+    # Get rizzlers
+    vector_irrep_rizzler = vector_field.get_irrep_rizzler()
+    vector_cartesian_rizzler = vector_field.get_cartesian_rizzler(cache_rtps=True)
+    vector_cartesian_rizzler_2d = vector_field.get_cartesian_rizzler(
+        cache_rtps=True, 
+        project_2d=True, 
+        projection_plane='xy'
+    )
+    
+    # Convert to irreps
+    vector_irrep_tensor, _ = vector_irrep_rizzler(vector_field.tensor)
+    
+    # Time standard approach (without projection)
+    print("Standard approach (no projection)...")
+    start_time = time.time()
+    vector_standard = vector_cartesian_rizzler(vector_irrep_tensor)
+    standard_time = time.time() - start_time
+    print(f"Standard approach time: {standard_time:.6f} seconds")
+    
+    # Time with built-in projection
+    print("Built-in projection approach...")
+    start_time = time.time()
+    vector_builtin_proj = vector_cartesian_rizzler_2d(vector_irrep_tensor)
+    builtin_time = time.time() - start_time
+    print(f"Built-in projection time: {builtin_time:.6f} seconds")
+    
+    # Time with separate projection
+    print("Separate projection approach...")
+    start_time = time.time()
+    vector_separate_proj = vector_cartesian_rizzler.project_to_2d(vector_irrep_tensor)
+    separate_time = time.time() - start_time
+    print(f"Separate projection time: {separate_time:.6f} seconds")
+    
+    # Time direct utility function
+    print("Direct utility function approach...")
+    start_time = time.time()
+    vector_direct_proj = project_tensor_to_2d(vector_standard)
+    direct_time = time.time() - start_time
+    print(f"Direct utility function time: {direct_time:.6f} seconds")
+    
+    # Compare results
+    print("\nComparing vector projection results...")
+    print(f"Built-in vs Separate: {torch.allclose(vector_builtin_proj, vector_separate_proj)}")
+    print(f"Built-in vs Direct: {torch.allclose(vector_builtin_proj, vector_direct_proj)}")
+    
+    # Test symmetric tensor projection
+    print("\n--- Symmetric Tensor Field Projection ---")
+    
+    # Get rizzlers
+    sym_irrep_rizzler = sym_tensor_field.get_irrep_rizzler()
+    sym_cartesian_rizzler = sym_tensor_field.get_cartesian_rizzler(cache_rtps=True)
+    sym_cartesian_rizzler_2d = sym_tensor_field.get_cartesian_rizzler(
+        cache_rtps=True, 
+        project_2d=True, 
+        projection_plane='xy',
+        preserve_trace=True
+    )
+    
+    # Convert to irreps
+    sym_irrep_tensor, _ = sym_irrep_rizzler(sym_tensor_field.tensor)
+    
+    # Time standard approach (without projection)
+    print("Standard approach (no projection)...")
+    start_time = time.time()
+    sym_standard = sym_cartesian_rizzler(sym_irrep_tensor)
+    standard_time = time.time() - start_time
+    print(f"Standard approach time: {standard_time:.6f} seconds")
+    
+    # Time with built-in projection
+    print("Built-in projection approach...")
+    start_time = time.time()
+    sym_builtin_proj = sym_cartesian_rizzler_2d(sym_irrep_tensor)
+    builtin_time = time.time() - start_time
+    print(f"Built-in projection time: {builtin_time:.6f} seconds")
+    
+    # Time with separate projection
+    print("Separate projection approach...")
+    start_time = time.time()
+    sym_separate_proj = sym_cartesian_rizzler.project_to_2d(sym_irrep_tensor)
+    separate_time = time.time() - start_time
+    print(f"Separate projection time: {separate_time:.6f} seconds")
+    
+    # Time direct utility function
+    print("Direct utility function approach...")
+    start_time = time.time()
+    sym_direct_proj = project_tensor_to_2d(sym_standard)
+    direct_time = time.time() - start_time
+    print(f"Direct utility function time: {direct_time:.6f} seconds")
+    
+    # Compare results
+    print("\nComparing symmetric tensor projection results...")
+    print(f"Built-in vs Separate: {torch.allclose(sym_builtin_proj, sym_separate_proj)}")
+    print(f"Built-in vs Direct: {torch.allclose(sym_builtin_proj, sym_direct_proj)}")
+    
+    # Test trace preservation
+    print("\nTesting trace preservation...")
+    
+    # For symmetric tensors, we need to handle the flattened format
+    # The format is [xx, xy, xz, yy, yz, zz]
+    if sym_standard.shape[1] == 6:  # Symmetric tensor in flattened form
+        # Calculate trace directly from the flattened format
+        standard_trace = sym_standard[:, 0] + sym_standard[:, 3] + sym_standard[:, 5]  # xx + yy + zz
+        projected_trace = sym_builtin_proj[:, 0] + sym_builtin_proj[:, 3]  # xx + yy (zz is zeroed)
+    else:  # Full tensor format
+        # Reshape to 3x3 for easier trace calculation
+        sym_standard_3d = sym_standard.view(batch_size, 3, 3)
+        sym_builtin_proj_3d = sym_builtin_proj.view(batch_size, 3, 3)
+        
+        # Calculate traces
+        standard_trace = torch.diagonal(sym_standard_3d, dim1=1, dim2=2).sum(dim=1)
+        projected_trace = torch.diagonal(sym_builtin_proj_3d, dim1=1, dim2=2).sum(dim=1)
+    
+    # Compare traces
+    trace_preserved = torch.allclose(standard_trace, projected_trace)
+    print(f"Trace preserved: {trace_preserved}")
+    print(f"Max trace difference: {torch.max(torch.abs(standard_trace - projected_trace))}")
+    
+    # Test general tensor projection
+    print("\n--- General Tensor Field Projection ---")
+    
+    # Get rizzlers
+    gen_irrep_rizzler = gen_tensor_field.get_irrep_rizzler()
+    gen_cartesian_rizzler = gen_tensor_field.get_cartesian_rizzler(cache_rtps=True)
+    gen_cartesian_rizzler_2d = gen_tensor_field.get_cartesian_rizzler(
+        cache_rtps=True, 
+        project_2d=True, 
+        projection_plane='xy',
+        preserve_trace=True
+    )
+    
+    # Convert to irreps
+    gen_irrep_tensor, _ = gen_irrep_rizzler(gen_tensor_field.tensor)
+    
+    # Time standard approach (without projection)
+    print("Standard approach (no projection)...")
+    start_time = time.time()
+    gen_standard = gen_cartesian_rizzler(gen_irrep_tensor)
+    standard_time = time.time() - start_time
+    print(f"Standard approach time: {standard_time:.6f} seconds")
+    
+    # Time with built-in projection
+    print("Built-in projection approach...")
+    start_time = time.time()
+    gen_builtin_proj = gen_cartesian_rizzler_2d(gen_irrep_tensor)
+    builtin_time = time.time() - start_time
+    print(f"Built-in projection time: {builtin_time:.6f} seconds")
+    
+    # Time with separate projection
+    print("Separate projection approach...")
+    start_time = time.time()
+    gen_separate_proj = gen_cartesian_rizzler.project_to_2d(gen_irrep_tensor)
+    separate_time = time.time() - start_time
+    print(f"Separate projection time: {separate_time:.6f} seconds")
+    
+    # Time direct utility function
+    print("Direct utility function approach...")
+    start_time = time.time()
+    gen_direct_proj = project_tensor_to_2d(gen_standard)
+    direct_time = time.time() - start_time
+    print(f"Direct utility function time: {direct_time:.6f} seconds")
+    
+    # Compare results
+    print("\nComparing general tensor projection results...")
+    print(f"Built-in vs Separate: {torch.allclose(gen_builtin_proj, gen_separate_proj)}")
+    print(f"Built-in vs Direct: {torch.allclose(gen_builtin_proj, gen_direct_proj)}")
+    
+    # Test trace preservation for general tensors
+    print("\nTesting trace preservation for general tensors...")
+    
+    # Handle different tensor formats
+    if gen_standard.shape[1] == 9:  # Flattened format [xx, xy, xz, yx, yy, yz, zx, zy, zz]
+        # Calculate trace directly from the flattened format
+        gen_standard_trace = gen_standard[:, 0] + gen_standard[:, 4] + gen_standard[:, 8]  # xx + yy + zz
+        gen_projected_trace = gen_builtin_proj[:, 0] + gen_builtin_proj[:, 4]  # xx + yy (zz is zeroed)
+    else:  # Full tensor format
+        # Reshape to 3x3 for easier trace calculation
+        gen_standard_3d = gen_standard.view(batch_size, 3, 3)
+        gen_builtin_proj_3d = gen_builtin_proj.view(batch_size, 3, 3)
+        
+        # Calculate traces
+        gen_standard_trace = torch.diagonal(gen_standard_3d, dim1=1, dim2=2).sum(dim=1)
+        gen_projected_trace = torch.diagonal(gen_builtin_proj_3d, dim1=1, dim2=2).sum(dim=1)
+    
+    # Compare traces
+    gen_trace_preserved = torch.allclose(gen_standard_trace, gen_projected_trace)
+    print(f"Trace preserved: {gen_trace_preserved}")
+    print(f"Max trace difference: {torch.max(torch.abs(gen_standard_trace - gen_projected_trace))}")
+    
+    # Test different projection planes
+    print("\n--- Testing Different Projection Planes ---")
+    
+    # Create a test tensor
+    test_tensor = torch.randn(10, 3, 3)
+    
+    # Project to different planes
+    xy_proj = project_tensor_to_2d(test_tensor, plane='xy')
+    xz_proj = project_tensor_to_2d(test_tensor, plane='xz')
+    yz_proj = project_tensor_to_2d(test_tensor, plane='yz')
+    
+    # Check that the appropriate components are zero
+    print("XY projection - z components zero:", 
+          torch.all(xy_proj[:, 2, :] == 0) and torch.all(xy_proj[:, :, 2] == 0))
+    print("XZ projection - y components zero:", 
+          torch.all(xz_proj[:, 1, :] == 0) and torch.all(xz_proj[:, :, 1] == 0))
+    print("YZ projection - x components zero:", 
+          torch.all(yz_proj[:, 0, :] == 0) and torch.all(yz_proj[:, :, 0] == 0))
+    
+    # Test trace preservation across different planes
+    print("\nTesting trace preservation across planes...")
+    original_trace = torch.diagonal(test_tensor, dim1=1, dim2=2).sum(dim=1)
+    xy_trace = torch.diagonal(xy_proj, dim1=1, dim2=2).sum(dim=1)
+    xz_trace = torch.diagonal(xz_proj, dim1=1, dim2=2).sum(dim=1)
+    yz_trace = torch.diagonal(yz_proj, dim1=1, dim2=2).sum(dim=1)
+    
+    print(f"Original vs XY: {torch.allclose(original_trace, xy_trace)}")
+    print(f"Original vs XZ: {torch.allclose(original_trace, xz_trace)}")
+    print(f"Original vs YZ: {torch.allclose(original_trace, yz_trace)}")
+    
+    # Test without trace preservation
+    print("\n--- Testing Without Trace Preservation ---")
+    
+    # Project without trace preservation
+    no_trace_proj = project_tensor_to_2d(test_tensor, plane='xy', preserve_trace=False)
+    
+    # Check that z components are zero
+    print("Z components zero:", 
+          torch.all(no_trace_proj[:, 2, :] == 0) and torch.all(no_trace_proj[:, :, 2] == 0))
+    
+    # Check that trace is not preserved
+    no_trace_trace = torch.diagonal(no_trace_proj, dim1=1, dim2=2).sum(dim=1)
+    print(f"Trace preserved: {torch.allclose(original_trace, no_trace_trace)}")
+    print(f"Max trace difference: {torch.max(torch.abs(original_trace - no_trace_trace))}")
+    
+    print("\n--- All 2D Projection Tests Completed ---")
