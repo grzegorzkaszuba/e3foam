@@ -805,6 +805,25 @@ class TensorData:
         
         return self
 
+    def __getitem__(self, idx):
+        """
+        Slice the TensorData along the batch dimension.
+        
+        Args:
+            idx: Index or slice to select from the batch dimension
+            
+        Returns:
+            A new TensorData object with the selected batch items
+        """
+        # Create a copy of the current object
+        import copy
+        result = copy.deepcopy(self)
+        
+        # Slice the tensor along the batch dimension
+        result.tensor = self.tensor[idx]
+        
+        return result
+
 
 class IrrepRizzler:
     """
