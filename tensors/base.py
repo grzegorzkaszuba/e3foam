@@ -40,7 +40,20 @@ from typing import List
 from e3nn.io import CartesianTensor
 from e3nn import o3  # Import here to avoid circular imports
 import time
-from utils import project_tensor_to_2d  # Use the correct import path
+# Try relative import first (for when e3foam is a package)
+try:
+    from .utils import project_tensor_to_2d
+# If that fails, try absolute import (for when e3foam is in path)
+except ImportError:
+    try:
+        from e3foam.tensors.utils import project_tensor_to_2d
+    # If both fail, provide a helpful error message
+    except ImportError:
+        raise ImportError(
+            "Could not import project_tensor_to_2d. Make sure either:\n"
+            "1. e3foam is installed as a package, or\n"
+            "2. The e3foam directory is in your Python path."
+        )
 
 
 def safe_divide(numerator, denominator, safe_value=0):
@@ -447,7 +460,7 @@ class TensorData:
                     full_tensor[:, 2, 0] = -field.tensor[:, 1]  # -xz
                     full_tensor[:, 1, 2] = field.tensor[:, 2]   # yz
                     full_tensor[:, 2, 1] = -field.tensor[:, 2]  # -yz
-                
+                    
                 # Convert to irreps using CartesianTensor
                 ct = CartesianTensor(ct_signature)
                 irrep_data = ct.from_cartesian(full_tensor)
@@ -767,6 +780,31 @@ class TensorData:
         # Create a rizzler object instead of a function
         return CartesianRizzler(self, cache_rtps=cache_rtps, project_2d=project_2d, projection_plane=projection_plane, preserve_trace=preserve_trace)
 
+    def to(self, device=None, dtype=None):
+        """
+        Move the tensor data to the specified device and data type.
+        
+        Args:
+            device: The device to move tensors to
+            dtype: The data type to convert tensors to
+        
+        Returns:
+            self for method chaining
+        """
+        if device is not None or dtype is not None:
+            self.tensor = self.tensor.to(device=device, dtype=dtype)
+            
+            # Also move indices to the same device
+            if device is not None:
+                if hasattr(self, 'ptr'):
+                    self.ptr.to(device=device)
+                if hasattr(self, 'rank'):
+                    self.rank.to(device=device)
+                if hasattr(self, 'symmetry'):
+                    self.symmetry.to(device=device)
+        
+        return self
+
 
 class IrrepRizzler:
     """
@@ -808,6 +846,21 @@ class IrrepRizzler:
         
         # Return the irrep tensor and string (matching original behavior)
         return irrep_tensor, irreps_str
+
+    def to(self, device=None, dtype=None):
+        """
+        Move the rizzler's internal tensors to the specified device and data type.
+        
+        Args:
+            device: The device to move tensors to
+            dtype: The data type to convert tensors to
+        
+        Returns:
+            self for method chaining
+        """
+        # Move any cached tensors to the specified device and dtype
+        # Currently IrrepRizzler doesn't cache tensors, but adding for future-proofing
+        return self
 
 
 class CartesianRizzler:
@@ -1100,6 +1153,25 @@ class CartesianRizzler:
         # Project to 2D
         return project_tensor_to_2d(cartesian_tensor, plane=plane, preserve_trace=preserve_trace)
 
+    def to(self, device=None, dtype=None):
+        """
+        Move the rizzler's internal tensors to the specified device and data type.
+        
+        Args:
+            device: The device to move tensors to
+            dtype: The data type to convert tensors to
+        
+        Returns:
+            self for method chaining
+        """
+        # Move cached RTPs to the specified device and dtype
+        if self.rtp_cache:
+            for key, rtp in self.rtp_cache.items():
+                if hasattr(rtp, 'to'):
+                    self.rtp_cache[key] = rtp.to(device=device, dtype=dtype)
+        
+        return self
+
 @dataclass
 class TensorIndex:
     """
@@ -1142,6 +1214,26 @@ class TensorIndex:
             
     def __len__(self):
         return len(self.values)
+
+    def to(self, device=None, dtype=None):
+        """
+        Move the tensor index to the specified device and data type.
+        
+        Args:
+            device: The device to move tensors to
+            dtype: The data type to convert tensors to
+        
+        Returns:
+            self for method chaining
+        """
+        if device is not None:
+            self.ptr = self.ptr.to(device=device)
+        
+        if device is not None or dtype is not None:
+            if self.values is not None:
+                self.values = self.values.to(device=device, dtype=dtype)
+        
+        return self
 
 
 if __name__ == "__main__":
@@ -1333,7 +1425,7 @@ if __name__ == "__main__":
     print("Creating rizzler with caching...")
     test_cartesian_rizzler = test_tensor.get_cartesian_rizzler(cache_rtps=True)
     
-    # Convert to irreps
+        # Convert to irreps
     test_irrep_tensor, _ = test_irrep_rizzler(test_tensor.tensor)
     
     # First run (should compute RTPs)
