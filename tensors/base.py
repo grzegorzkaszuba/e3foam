@@ -820,7 +820,11 @@ class TensorData:
         result = copy.deepcopy(self)
         
         # Slice the tensor along the batch dimension
-        result.tensor = self.tensor[idx]
+        # For single indices, preserve the batch dimension by adding a new axis
+        if isinstance(idx, int):
+            result.tensor = self.tensor[idx:idx+1]  # Keep as (1, features) instead of (features,)
+        else:
+            result.tensor = self.tensor[idx]
         
         return result
 
