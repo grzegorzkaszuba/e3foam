@@ -1,19 +1,19 @@
 Intended purposes of the library:
 1. Read foamfields:
-a) extract internal field,
-b) extract boundary field if needed,
-c) extract all metadata as entries of a designated Python class
+a) extract internal field, -> Done!
+b) extract boundary field if needed, -> Not done
+c) extract all metadata as entries of a designated Python class -> Not done - I call our brute force a failure
 2. Inspect and modify foam fields
-a) compute error between simulation output foam fields and ground truth foam fields
-b) inject Python-sourced data, like outputs of neural model back intro foam fields, while preserving their functionality
-c) manage entire cases, adressing them by time steps, iterating over time steps, iterating over alternative cases to conduct same operations
-d) inspect entire simulation cases timestep by timestep
+a) compute error between simulation output foam fields and ground truth foam fields -> Done!
+b) inject Python-sourced data, like outputs of neural model back intro foam fields, while preserving their functionality -> Not done - see 1c)
+c) manage entire cases, adressing them by time steps, iterating over time steps, iterating over alternative cases to conduct same operations -> Done! - plotting entire cases and appending datapoints from different ones
+d) inspect entire simulation cases timestep by timestep -> Done
 3. Go from openfoam data into irrep tensors of e3nn
 a) use tensor metadata (like "it's a symmetric rank-2 tensor") to assign correct irreps, ✓ [SOLVED in base.py - TensorData class handles this]
 b) use e3nn.io.CartesianTensor class to recompute the internal field into irrep tensor ✓ [SOLVED in base.py - to_irreps() method]
 4. Handle e3nn data for machine learning in physics-informed way
 a) scale the e3nn data in a way that doesn't disrupt equivariant processing ✓ [PARTLY SOLVED in base.py - apply_norms() method preserves directions, but this point is a broad statement and needs further work, also the conditional statements that work with cartesian tensor are quite specific (but it's fine)]
-b) provide an end-to-end pipeline that starts with a collection of foam cases and ends with a dataset ready to give to lightning trainer
+b) provide an end-to-end pipeline that starts with a collection of foam cases and ends with a dataset ready to give to lightning trainer -> We will see
 
 
 

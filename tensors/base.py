@@ -764,21 +764,15 @@ class TensorData:
         # Create a rizzler object instead of a function
         return IrrepRizzler(self)
 
-    def get_cartesian_rizzler(self, cache_rtps=False, project_2d=False, projection_plane='xy', preserve_trace=True):
-        """
-        Creates an optimized object that converts irrep tensor back to Cartesian representation.
-        
-        Args:
-            cache_rtps: If True, pre-compute reduced tensor products for better performance
-            project_2d: If True, project the result to 2D
-            projection_plane: Plane to project to ('xy', 'xz', or 'yz')
-            preserve_trace: Whether to preserve the trace during projection
-            
-        Returns:
-            CartesianRizzler: An object that transforms irrep tensor to Cartesian representation
-        """
-        # Create a rizzler object instead of a function
-        return CartesianRizzler(self, cache_rtps=cache_rtps, project_2d=project_2d, projection_plane=projection_plane, preserve_trace=preserve_trace)
+    def get_cartesian_adapter(self, cache_rtps=False, project_2d=False, 
+                           projection_plane='xy', preserve_trace=True):
+        """Get an adapter for converting to Cartesian representation."""
+        return CartesianAdapter(self, cache_rtps=cache_rtps, project_2d=project_2d,
+                             projection_plane=projection_plane, preserve_trace=preserve_trace)
+
+    def get_irrep_adapter(self):
+        """Get an adapter for converting to irrep representation."""
+        return IrrepAdapter(self)
 
     def to(self, device=None, dtype=None):
         """
@@ -886,13 +880,15 @@ class IrrepRizzler:
         return self
 
 
-class CartesianRizzler:
-    """
-    Object that efficiently converts irrep tensor back to Cartesian representation.
-    """
+class CartesianAdapter:  # was CartesianRizzler
+    """Adapts between irrep and Cartesian representations."""
+    
+class IrrepAdapter:  # was IrrepRizzler
+    """Adapts between Cartesian and irrep representations."""
+
     def __init__(self, tensor_data, cache_rtps=False, project_2d=False, projection_plane='xy', preserve_trace=True):
         """
-        Initialize the CartesianRizzler with a TensorData object.
+        Initialize the CartesianAdapter with a TensorData object.
         
         Args:
             tensor_data: TensorData object to base the transformation on
@@ -1297,7 +1293,7 @@ if __name__ == "__main__":
     # Get the rizzlers
     print("\n--- Creating Complex Tensor Rizzlers ---")
     complex_irrep_rizzler = complex_tensor.get_irrep_rizzler()
-    complex_cartesian_rizzler = complex_tensor.get_cartesian_rizzler(cache_rtps=True)
+    complex_cartesian_rizzler = complex_tensor.get_cartesian_adapter(cache_rtps=True)
     
     # Test the standard approach
     print("\n--- Standard TensorData Approach (Complex Tensor) ---")
@@ -1334,7 +1330,7 @@ if __name__ == "__main__":
     # Get the rizzlers
     print("\n--- Creating Vector Rizzlers ---")
     vector_irrep_rizzler = vector_field.get_irrep_rizzler()
-    vector_cartesian_rizzler = vector_field.get_cartesian_rizzler(cache_rtps=True)
+    vector_cartesian_rizzler = vector_field.get_cartesian_adapter(cache_rtps=True)
     
     # Test the standard approach
     print("\n--- Standard TensorData Approach (Vectors) ---")
@@ -1446,7 +1442,7 @@ if __name__ == "__main__":
     
     # Create cartesian rizzler with caching
     print("Creating rizzler with caching...")
-    test_cartesian_rizzler = test_tensor.get_cartesian_rizzler(cache_rtps=True)
+    test_cartesian_rizzler = test_tensor.get_cartesian_adapter(cache_rtps=True)
     
         # Convert to irreps
     test_irrep_tensor, _ = test_irrep_rizzler(test_tensor.tensor)
@@ -1471,7 +1467,7 @@ if __name__ == "__main__":
     
     # Create a new rizzler and set RTPs explicitly
     print("Creating new rizzler and setting RTPs explicitly...")
-    new_cartesian_rizzler = test_tensor.get_cartesian_rizzler(cache_rtps=False)
+    new_cartesian_rizzler = test_tensor.get_cartesian_adapter(cache_rtps=False)
     new_cartesian_rizzler.set_rtps(rtps)
     
     # Run with pre-set RTPs
@@ -1504,8 +1500,8 @@ if __name__ == "__main__":
     
     # Get rizzlers
     vector_irrep_rizzler = vector_field.get_irrep_rizzler()
-    vector_cartesian_rizzler = vector_field.get_cartesian_rizzler(cache_rtps=True)
-    vector_cartesian_rizzler_2d = vector_field.get_cartesian_rizzler(
+    vector_cartesian_rizzler = vector_field.get_cartesian_adapter(cache_rtps=True)
+    vector_cartesian_rizzler_2d = vector_field.get_cartesian_adapter(
         cache_rtps=True, 
         project_2d=True, 
         projection_plane='xy'
@@ -1552,8 +1548,8 @@ if __name__ == "__main__":
     
     # Get rizzlers
     sym_irrep_rizzler = sym_tensor_field.get_irrep_rizzler()
-    sym_cartesian_rizzler = sym_tensor_field.get_cartesian_rizzler(cache_rtps=True)
-    sym_cartesian_rizzler_2d = sym_tensor_field.get_cartesian_rizzler(
+    sym_cartesian_rizzler = sym_tensor_field.get_cartesian_adapter(cache_rtps=True)
+    sym_cartesian_rizzler_2d = sym_tensor_field.get_cartesian_adapter(
         cache_rtps=True, 
         project_2d=True, 
         projection_plane='xy',
@@ -1624,8 +1620,8 @@ if __name__ == "__main__":
     
     # Get rizzlers
     gen_irrep_rizzler = gen_tensor_field.get_irrep_rizzler()
-    gen_cartesian_rizzler = gen_tensor_field.get_cartesian_rizzler(cache_rtps=True)
-    gen_cartesian_rizzler_2d = gen_tensor_field.get_cartesian_rizzler(
+    gen_cartesian_rizzler = gen_tensor_field.get_cartesian_adapter(cache_rtps=True)
+    gen_cartesian_rizzler_2d = gen_tensor_field.get_cartesian_adapter(
         cache_rtps=True, 
         project_2d=True, 
         projection_plane='xy',
