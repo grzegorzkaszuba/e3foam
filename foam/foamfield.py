@@ -18,7 +18,7 @@ from tensors.base import TensorData
 class FoamField:
     """
     Represents an OpenFOAM field file structure.
-
+    
     Attributes:
         field_type: OpenFOAM field class (e.g., volVectorField)
         dimensions: Physical dimensions [kg m s K mol A cd]
@@ -35,17 +35,17 @@ class FoamField:
     format_version: str = "2.0"
     format_type: str = "ascii"
     location: Optional[str] = None
-
+    
     @property
     def size(self) -> int:
         """Number of entries in internal field."""
         return len(self.internal_field)
-
+    
     @property
     def is_uniform(self) -> bool:
         """Whether the field has uniform values."""
         return len(self.internal_field) == 1
-
+    
     def to_tensor(self) -> torch.Tensor:
         """Convert internal field to tensor."""
         # Check if first entry is a list/tuple (vector/tensor) or scalar
@@ -59,7 +59,7 @@ class FoamField:
     def format_float(self, value: float) -> str:
         """Format float values according to OpenFOAM conventions."""
         sci_notation_threshold = 1e-04
-
+        
         if abs(value) < sci_notation_threshold:
             if abs(value) < 1e-15:
                 return "0"
@@ -73,10 +73,10 @@ class FoamField:
             if self.location is None:
                 raise ValueError("No file path specified for injection")
             output_path = self.location
-
+            
         # Format dimensions
         dims_str = f"[{' '.join(str(d) for d in self.dimensions)}]"
-
+        
         # Format internal field values
         if isinstance(self.internal_field[0], (list, tuple)):
             # Vector/Tensor
@@ -89,7 +89,7 @@ class FoamField:
             values_str = "\n".join(
                 self.format_float(x) for x in self.internal_field
             )
-
+            
         # Format boundary field
         boundary_str = ""
         if self.boundary_field:
@@ -100,7 +100,7 @@ class FoamField:
                     boundary_str += f"        {key}    {value};\n"
                 boundary_str += "    }\n"
             boundary_str += "}"
-
+            
         # Write file
         with open(output_path, 'w') as f:
             f.write(f"""FoamFile
@@ -135,28 +135,28 @@ def parse_foam_file(filepath: str) -> FoamField:
     current_boundary = None
     is_vector_or_tensor = None
     array_size = None  # Track array size separately
-
+    
     with open(filepath, 'r') as f:
         for line in f:
             line = line.strip()
-
+            
             # Get field type
             if line.startswith('class'):
                 field_type = line.split()[-1].rstrip(';')
                 is_vector_or_tensor = 'vector' in field_type.lower() or 'tensor' in field_type.lower()
                 continue
-
+                
             # Get dimensions
             if line.startswith('dimensions'):
                 dims = line.split('[')[1].split(']')[0]
                 dimensions = [int(d) for d in dims.split()]
                 continue
-
+                
             # Parse internal field values
             if line.startswith('internalField'):
                 in_internal_field = True
                 continue
-
+                
             if in_internal_field:
                 if line == ')':
                     in_internal_field = False
@@ -167,7 +167,7 @@ def parse_foam_file(filepath: str) -> FoamField:
                 if line.isdigit():
                     array_size = int(line)
                     continue
-
+                    
                 try:
                     if is_vector_or_tensor:
                         if line.startswith('('):
@@ -180,13 +180,13 @@ def parse_foam_file(filepath: str) -> FoamField:
                             values.append(value)
                 except ValueError:
                     continue
-
+            
             # Parse boundary field
             if line.startswith('boundaryField'):
                 in_boundary_field = True
                 in_internal_field = False
                 continue
-
+                
             if in_boundary_field:
                 if line == '{':
                     continue
@@ -195,19 +195,19 @@ def parse_foam_file(filepath: str) -> FoamField:
                         in_boundary_field = False
                         current_boundary = None
                     continue
-
+                    
                 # New boundary section
                 if not line.startswith(' ') and line.endswith('{'):
                     current_boundary = line.rstrip('{').strip()
                     boundary_data[current_boundary] = {}
                     continue
-
+                
                 # Boundary properties
                 if current_boundary and '    ' in line:
                     key, value = [x.strip() for x in line.split(maxsplit=1)]
                     value = value.rstrip(';')
                     boundary_data[current_boundary][key] = value
-
+    
     # Verify array size matches
     if array_size is not None and len(values) != array_size:
         raise ValueError(f"Expected {array_size} values, got {len(values)}")
@@ -218,19 +218,19 @@ def parse_foam_file(filepath: str) -> FoamField:
         internal_field=values,
         boundary_field=boundary_data if boundary_data else None,
         location=filepath
-    )
+    ) 
 
 
 def compare_foam_fields(ground_truth_path: str, prediction_path: str, relative_tolerance: float = 1e-10) -> Dict[
     str, float]:
     """
     Compare two OpenFOAM fields and calculate error metrics.
-
+    
     Args:
         ground_truth_path: Path to ground truth OpenFOAM field
         prediction_path: Path to predicted OpenFOAM field
         relative_tolerance: Tolerance for MAPE calculation to avoid division by zero
-
+        
     Returns:
         Dictionary with error metrics:
             - MSE: Mean Squared Error
@@ -243,27 +243,27 @@ def compare_foam_fields(ground_truth_path: str, prediction_path: str, relative_t
     # Read both fields
     gt_field = parse_foam_file(ground_truth_path)
     pred_field = parse_foam_file(prediction_path)
-
+    
     # Verify fields are compatible
     if gt_field.field_type != pred_field.field_type:
         raise ValueError(f"Field types don't match: {gt_field.field_type} vs {pred_field.field_type}")
     if len(gt_field.internal_field) != len(pred_field.internal_field):
         raise ValueError(f"Field sizes don't match: {len(gt_field.internal_field)} vs {len(pred_field.internal_field)}")
-
+    
     # Convert to tensors
     gt_tensor = gt_field.to_tensor()
     pred_tensor = pred_field.to_tensor()
-
+    
     # Calculate errors
     abs_error = torch.abs(gt_tensor - pred_tensor)
     squared_error = abs_error ** 2
-
+    
     # Handle relative errors carefully to avoid division by zero
     # Add small tolerance relative to the data scale
     scale = torch.mean(torch.abs(gt_tensor))
     denom = torch.maximum(torch.abs(gt_tensor), torch.full_like(gt_tensor, relative_tolerance * scale))
     relative_error = abs_error / denom
-
+    
     # Calculate metrics
     metrics = {
         "MSE": torch.mean(squared_error).item(),
@@ -273,13 +273,13 @@ def compare_foam_fields(ground_truth_path: str, prediction_path: str, relative_t
         "max_error": torch.max(abs_error).item(),
         "max_relative_error": torch.max(relative_error * 100).item(),  # as percentage
     }
-
+    
     return metrics
 
 def plot_case(case_path, variables: List[str], constants: List[Union[TensorData, torch.Tensor]], metrics: List[Callable], 
               show=True, save_path=None):
     """Plot metrics over time for OpenFOAM case.
-    
+
     Args:
         case_path: Path to OpenFOAM case directory
         variables: List of field names to extract from each time step

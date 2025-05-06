@@ -103,4 +103,4 @@ def project_tensor_to_2d(tensor, plane='xy', preserve_trace=True):
         return result
     
     else:
-        raise ValueError(f"Unsupported tensor shape: {tensor.shape}") 
+        raise ValueError(f"Unsupported tensor shape: {tensor.shape}")
