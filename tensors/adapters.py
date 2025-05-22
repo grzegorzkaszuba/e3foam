@@ -6,7 +6,6 @@ import numpy as np
 from e3nn.io import CartesianTensor
 from e3nn import o3  # Import here to avoid circular imports
 import time
-from adapters import IrrepAdapter, CartesianAdapter
 # Try relative import first (for when e3foam is a package)
 try:
     from .utils import project_tensor_to_2d
@@ -21,6 +20,8 @@ except ImportError:
             "1. e3foam is installed as a package, or\n"
             "2. The e3foam directory is in your Python path."
         )
+
+
 
 class IrrepAdapter:
     """
@@ -51,8 +52,8 @@ class IrrepAdapter:
         Returns:
             tuple: (irrep_tensor, irreps_str)
         """
-        from e3foam.tensors.base import TensorData  # Import here to avoid circular imports
-        
+          # Import here to avoid circular imports
+        from .base import TensorData
         # Case a: Input is already a TensorData object
         if isinstance(tensor, TensorData):
             temp_td = tensor

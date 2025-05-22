@@ -40,7 +40,7 @@ from typing import List
 from e3nn.io import CartesianTensor
 from e3nn import o3  # Import here to avoid circular imports
 import time
-from adapters import IrrepAdapter, CartesianAdapter
+from .adapters import IrrepAdapter, CartesianAdapter
 # Try relative import first (for when e3foam is a package)
 try:
     from .utils import project_tensor_to_2d
