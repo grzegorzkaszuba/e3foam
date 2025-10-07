@@ -484,6 +484,12 @@ class TensorData:
         
         return combined_tensor, irreps_str, cartesian_str
 
+    def to_tabular(self):
+        return self.tensor
+
+    def to_tensor_basis(self, policy):
+        return policy(self) # TODO define ways to implement TBNN into the framework
+
     @classmethod
     def from_irreps(cls, irrep_tensor: torch.Tensor, irreps_str: str, cartesian_str: str, 
                     cache_rtps: bool = False, cached_rtps: dict = None) -> 'TensorData':

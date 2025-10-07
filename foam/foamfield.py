@@ -164,7 +164,8 @@ def parse_foam_file(filepath: str) -> FoamField:
                 if line == '(':
                     continue
                 # Get array size but don't parse it as value
-                if line.isdigit():
+                if line.isdigit() and array_size is None:
+                    a = filepath
                     array_size = int(line)
                     continue
                     

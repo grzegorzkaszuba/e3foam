@@ -4,7 +4,7 @@ Equivariant scaling operations for tensor data.
 
 from typing import Optional
 import torch
-from tensors.base import TensorData
+from src.e3foam.tensors.base import TensorData
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 
 
