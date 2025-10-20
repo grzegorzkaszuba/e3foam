@@ -2,7 +2,7 @@ from typing import Union, Dict, List, Optional
 import os
 import torch
 from tensors.base import TensorData
-from foam.readers import FoamField, parse_foam_file
+from foam.foamfield import FoamField, parse_foam_file
 
 def read_foam_field(filepath: str) -> TensorData:
     """
